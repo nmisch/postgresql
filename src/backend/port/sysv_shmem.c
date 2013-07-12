@@ -31,36 +31,10 @@
 #include "miscadmin.h"
 #include "storage/ipc.h"
 #include "storage/pg_shmem.h"
-#include "storage/shmem.h"
 
 
 typedef key_t IpcMemoryKey;		/* shared memory key passed to shmget(2) */
 typedef int IpcMemoryId;		/* shared memory ID returned by shmget(2) */
-
-#define IPCProtection	(0600)	/* access/modify by user only */
-
-#ifdef SHM_SHARE_MMU			/* use intimate shared memory on Solaris */
-#define PG_SHMAT_FLAGS			SHM_SHARE_MMU
-#else
-#define PG_SHMAT_FLAGS			0
-#endif
-
-/* Linux prefers MAP_ANONYMOUS, but the flag is called MAP_ANON on other systems. */
-#ifndef MAP_ANONYMOUS
-#define MAP_ANONYMOUS			MAP_ANON
-#endif
-
-/* BSD-derived systems have MAP_HASSEMAPHORE, but it's not present (or needed) on Linux. */
-#ifndef MAP_HASSEMAPHORE
-#define MAP_HASSEMAPHORE		0
-#endif
-
-#define PG_MMAP_FLAGS			(MAP_SHARED|MAP_ANONYMOUS|MAP_HASSEMAPHORE)
-
-/* Some really old systems don't define MAP_FAILED. */
-#ifndef MAP_FAILED
-#define MAP_FAILED ((void *) -1)
-#endif
 
 
 unsigned long UsedShmemSegID = 0;
@@ -628,95 +602,4 @@ PGSharedMemoryAttach(IpcMemoryKey key, IpcMemoryId *shmid)
 	}
 
 	return hdr;
-}
-
-
-/*
- * Allocate a new shared memory segment of the specified length and attach it
- * to the current process at a system-chosen address.
- */
-void
-dsm_create(DynElephant *x, Size len)
-{
-	int fd;
-
-	/*
-	 * We presume startup destroyed any lingering memory objects, so we use
-	 * O_EXCL to detect unexpected reuse.
-	 */
-	fd = shm_open("/PG", O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
-	if (fd == -1)
-		elog(ERROR, "shm_open failed: %m");
-
-	if (ftruncate(fd, len) != 0)
-		elog(ERROR, "ftruncate failed: %m");
-
-	x->addr = mmap(NULL, len,
-				   PROT_READ | PROT_WRITE,
-				   MAP_SHARED | MAP_HASSEMAPHORE,
-				   fd, 0);
-	if (x->addr == MAP_FAILED)
-		elog(ERROR, "mmap failed: %m");
-
-	/*
-	 * XXX if we fail here, we need to reclaim the segment.  Probably need to
-	 * associate segments with resource owners.
-	 */
-	if (close(fd) != 0)
-		elog(ERROR, "close failed: %m");
-
-	x->len = len;
-}
-
-/*
- * Only the owning process should call after detaching itself.  After this is
- * done, later attempts to attach to the same segment will fail.  It's
- * unspecified
- */
-void
-dsm_destroy(DynElephant *x)
-{
-	if (munmap(x->addr, x->len) != 0)
-		elog(ERROR, "munmap failed: %m");
-
-	if (shm_unlink("/PG") == -1)
-		elog(ERROR, "shm_unlink failed: %m");
-}
-
-/*
- * Attempt to attach a dynamic shared memory area to the current process.
- * This should not normally be called in the owning process, but one can do so
- */
-void
-dsm_attach(DynElephant *x)
-{
-	int fd;
-	void *addr;
-
-	fd = shm_open("/PG", O_RDWR, 0);
-	if (fd == -1)
-		elog(ERROR, "shm_open failed: %m");
-
-	addr = mmap(x->addr, x->len,
-				PROT_READ | PROT_WRITE,
-				MAP_SHARED | MAP_HASSEMAPHORE,
-				fd, 0);
-	if (addr == MAP_FAILED)
-		elog(ERROR, "mmap failed: %m");
-	if (addr != x->addr)
-		elog(ERROR, "dsm_attach: address mismatch");
-
-	if (close(fd) != 0)
-		elog(ERROR, "close failed: %m");
-}
-
-/*
- * Undo a dsm_attach().  This frees the address space and allows the
- * allocation to be freed when all users have done so.
- */
-void
-dsm_detach(DynElephant *x)
-{
-	if (munmap(x->addr, x->len) != 0)
-		elog(ERROR, "munmap failed: %m");
 }

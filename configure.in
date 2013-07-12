@@ -1774,6 +1774,15 @@ else
   SHMEM_IMPLEMENTATION="src/backend/port/win32_shmem.c"
 fi
 
+# Select dynamic shared-memory implementation type.
+if test "$PORTNAME" = win32; then
+  DYNSHMEM_IMPLEMENTATION=src/backend/port/win32_dynshmem.c
+else
+  AC_SEARCH_LIBS([shm_open], [rt],
+				 [DYNSHMEM_IMPLEMENTATION=src/backend/port/posix_dynshmem.c],
+				 [DYNSHMEM_IMPLEMENTATION=src/backend/port/sysv_dynshmem.c])
+fi
+
 # Select latch implementation type.
 if test "$PORTNAME" != "win32"; then
   LATCH_IMPLEMENTATION="src/backend/port/unix_latch.c"
@@ -1953,6 +1962,7 @@ AC_CONFIG_FILES([GNUmakefile src/Makefile.global])
 
 AC_CONFIG_LINKS([
   src/backend/port/dynloader.c:src/backend/port/dynloader/${template}.c
+  src/backend/port/pg_dynshmem.c:${DYNSHMEM_IMPLEMENTATION}
   src/backend/port/pg_sema.c:${SEMA_IMPLEMENTATION}
   src/backend/port/pg_shmem.c:${SHMEM_IMPLEMENTATION}
   src/backend/port/pg_latch.c:${LATCH_IMPLEMENTATION}
