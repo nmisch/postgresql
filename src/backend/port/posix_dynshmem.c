@@ -19,6 +19,81 @@
 
 #include "storage/pg_shmem.h"
 
+/* PostgreSQL.<10-char 31-bit port>.<10-char 31-bit ordinal> */
+#define MAX_SHM_NAME 64
+
+typedef struct DSMPSM
+{
+	uint32 freelist[16];		/* bitmap of unused offsets */
+	int next;					/* next offset when overflowed */
+	slock_t dsm_lck;			/* protects all other fields */
+} DSPSM;
+
+struct DSMPSM *dsmpsm;
+
+Size
+DynShmemShmemSize()
+{
+	return sizeof(struct DSMPSM);
+}
+
+void
+DynShmemShmemInit()
+{
+	Size sz = DynShmemShmemSize();
+	bool found;
+
+	dsmpsm = ShmemInitStruct("POSIX DynShmem Status", sz, &found);
+
+	if (!IsUnderPostmaster)
+	{
+		/* Initialize shared memory area */
+		Assert(!found);
+
+		MemSet(dsmpsm, 0, sz);
+	}
+	else
+		Assert(found);
+}
+
+/*
+ * Buffer must have MAXNAME worth of space.
+ */
+int
+segname(char *buf, int ordinal)
+{
+	sprintf(buf, "PostgreSQL.%d.%d", UINT32_FORMAT, UINT32_FORMAT);
+}
+
+/*
+ * 
+ *
+ * A POSIX SHM implementation is permitted to be persist past reboots.
+ */
+int
+dsm_startup()
+{
+	int max;
+	int i;
+	int reclaimed = 0;
+
+	max = dsm_highwater();
+
+	for (i = 0; i < max; ++i)
+	{
+		if (shm_unlink(name) == 0)
+			reclaimed++;
+		else if (errno != ENOENT)
+			elog(WARNING, "shm_unlink failed: %m");
+	}
+
+	return reclaimed;
+#if 0
+	if (reclaimed > 0)
+		elog(DEBUG1, "reclaimed %d shared memory segments", );
+#endif
+}
+
 /*
  * Allocate a new shared memory segment of the specified length and attach it
  * to the current process at a system-chosen address.
@@ -27,12 +102,15 @@ void
 dsm_create(DynElephant *x, Size len)
 {
 	int fd;
+	char *name[MAX_SHM_NAME];
+
+	segname(name, -1);			/* reserve a new name */
 
 	/*
 	 * We presume startup destroyed any lingering memory objects, so we use
 	 * O_EXCL to detect unexpected reuse.
 	 */
-	fd = shm_open("/PG", O_RDWR | O_CREAT | O_EXCL, IPCProtection);
+	fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, IPCProtection);
 	if (fd == -1)
 		elog(ERROR, "shm_open failed: %m");
 
