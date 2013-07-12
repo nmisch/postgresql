@@ -75,4 +75,18 @@ extern Pointer SHMQueuePrev(const SHM_QUEUE *queue, const SHM_QUEUE *curElem,
 extern bool SHMQueueEmpty(const SHM_QUEUE *queue);
 extern bool SHMQueueIsDetached(const SHM_QUEUE *queue);
 
+
+typedef struct DynElephant
+{
+	pid_t	owner;				/* PID that created (and will delete) */
+	int		nr;					/* distinguish one owner from another */
+	void   *addr;				/* where to map */
+	Size	len;
+} DynElephant;
+
+extern void dsm_create(DynElephant *x, Size len);
+extern void dsm_destroy(DynElephant *x);
+extern void dsm_attach(DynElephant *x);
+extern void dsm_detach(DynElephant *x);
+
 #endif   /* SHMEM_H */
