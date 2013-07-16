@@ -24,9 +24,9 @@
 
 typedef struct DSMPSM
 {
+	slock_t freelist_lck;		/* protects all other fields */
 	uint32 freelist[16];		/* bitmap of unused offsets */
-	int next;					/* next offset when overflowed */
-	slock_t dsm_lck;			/* protects all other fields */
+	uint64 keys[512];
 } DSPSM;
 
 struct DSMPSM *dsmpsm;
@@ -57,18 +57,107 @@ DynShmemShmemInit()
 }
 
 /*
+ *				xxxx0111
+ * where x's are unspecified bits.  The two's complement negative is formed
+ * by inverting all the bits and adding one.  Inversion gives
+ *				yyyy1000
+ * where each y is the inverse of the corresponding x.	Incrementing gives
+ *				yyyyyy10000
+ * and then ANDing with the original value gives
+ *				00000010000
+
+ */
+static int
+allocate_unset_bit()
+{
+	/* Find the first free entry. */
+	for (wordnum = 0; wordnum < nwords; ++wordnum)
+	{
+		int32		w = dspsm->freelist[wordnum];
+
+
+		if (w != 0xFFFFFFFF)
+		{
+			
+		}
+	}
+
+
+, and inspect its cell.  If the cell has valid content that object
+object exists.  Release the spinlock and ftruncate to the correct length.
+
+}
+
+/*
  * Buffer must have MAXNAME worth of space.
  */
-int
-segname(char *buf, int ordinal)
+static void
+segname(char *buf, uint64 key)
 {
-	sprintf(buf, "PostgreSQL.%d.%d", UINT32_FORMAT, UINT32_FORMAT);
+	sprintf(buf, "PostgreSQL.%lu", key);
+}
+
+
+int
+get_seg(void)
+{
+	int32	   *word = dsmpsm->freelist;
+	int32		bit;
+
+	SpinLockAcquire(dsmpsm->freelist_lck);
+	offset = allocate_unset_bit();
+	SpinLockRelease(dsmpsm->freelist_lck);
+
+	/* If the slot is initialized, open the existing object. */
+	if (dsmpsm->keys[offset] != 0)
+	{
+		segname(namebuf, dsmpsm->keys[offset]);
+		fd = shm_open(name, O_RDWR, IPCProtection);
+		if (fd == -1)
+			elog(ERROR, "shm_open failed: %m");
+
+		return fd;
+	}
+
+	/*
+	 * If the offset is uninitialized, initialize it.  We proect this with a
+	 * lock so another backend so concurrent
+	 */
+	for (;;)
+	{
+		key = new_random_key();
+		LWLockAcquire(PSMLock, LW_EXCLUSIVE);
+		dsmpsm->keys[offset] = new_random_key;
+		persist_dsmpsm();
+		LWLockRelease(PSMLock);
+
+		segname(namebuf, dsmpsm->keys[offset]);
+		fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, IPCProtection);
+		if (fd != -1)
+			return fd;
+
+		/*
+		 * If we collided with an existing segment, generate a new key and try
+		 * again.
+		 */
+		if (errno != EEXIST)
+			elog(ERROR, "shm_open failed: %m");
+	}
 }
 
 /*
  * 
  *
- * A POSIX SHM implementation is permitted to be persist past reboots.
+ * A POSIX SHM implementation must persist objects independent of the process
+ * that created them, and it is permitted to persist that past reboots.  A
+ * semi-recent examples is FreeBSD 6.4 (2008).
+ *
+ * If we crash after an shm_unlink() starts and before truncate_dsmpsm()
+ * completes, the next startup may will try unlink segments a second time.
+ * This is usually harmless, but there is a vanishing possibility that another
+ * postmaster running under the same user account manages to choose the same
+ * key in the mean time.  XXX could we include something like the data
+ * directory or postmaster PID in the key to prevent this?
  */
 int
 dsm_startup()
@@ -77,15 +166,30 @@ dsm_startup()
 	int i;
 	int reclaimed = 0;
 
-	max = dsm_highwater();
+	recover_dsmpsm(&keys, &size);
 
-	for (i = 0; i < max; ++i)
+	for (i = 0; i < size; i++)
 	{
+		/*
+		 * Skip uninitialized entries.  The initialized entries usually form a
+		 * contiguous block at the front of the list, but holes are possible
+		 * when multiple backends were iniitalizing slots concurrently.
+		 */
+		if (keys[i] == 0)
+			continue;
+
+		segname(namebuf, key);
 		if (shm_unlink(name) == 0)
 			reclaimed++;
 		else if (errno != ENOENT)
 			elog(WARNING, "shm_unlink failed: %m");
 	}
+
+	pfree(keys);
+
+	/*
+	 */
+	truncate_dsmpsm();
 
 	return reclaimed;
 #if 0
