@@ -19,22 +19,43 @@
 
 #include "storage/pg_shmem.h"
 
-/* PostgreSQL.<10-char 31-bit port>.<10-char 31-bit ordinal> */
-#define MAX_SHM_NAME 64
+/* Maximum number of dynshmem segments.  TODO make it configurable. */
+#define MAXDSM 1000
 
-typedef struct DSMPSM
+/*
+ * Control data for dynamic shared memory, itself stored in permanent shared
+ * memory.
+ */
+typedef struct DynShmemControl
 {
-	slock_t freelist_lck;		/* protects all other fields */
-	uint32 freelist[16];		/* bitmap of unused offsets */
-	uint64 keys[512];
-} DSPSM;
+	int size;				/* size of keys/freelist arrays */
 
-struct DSMPSM *dsmpsm;
+	/*
+	 * Pseudorandom keys used to form POSIX shm paths.  If you mark a slot
+	 * used in the freelist, you may read that slot without a lock.  Modifying
+	 * a slot requires DynShmemInitLock.  (This is unnecessary in some cases,
+	 * but this rule is simple and applies to a slow path anyway.)  Each slot
+	 * begins as zero.  When a particular slot is needed for the first time,
+	 * the requesting backend initializes the slot.
+	 *
+	 * We could just use a incrementing integer, but that would make us
+	 * vulnerable to denial of service: a hostile local user could predict the
+	 * offset we'll check next and allocate the segments above that.  Maybe
+	 * this is overkill.
+	 */
+	uint64 *keys;
+
+	uint32 *freelist;		/* bitmap of unused offsets */
+	slock_t freelist_lck;	/* acquire to read or modify freelist */
+} DynShmemControl;
+
+struct DynShmemControl *dsmctl;
 
 Size
-DynShmemShmemSize()
+DynShmemShmemSize(void)
 {
-	return sizeof(struct DSMPSM);
+	return sizeof(struct DSMCTL) +
+		MAXDSM * (sizeof(*dsmctl->freelist) + sizeof(*dsmctl->keys));
 }
 
 void
@@ -43,20 +64,28 @@ DynShmemShmemInit()
 	Size sz = DynShmemShmemSize();
 	bool found;
 
-	dsmpsm = ShmemInitStruct("POSIX DynShmem Status", sz, &found);
+	dsmctl = ShmemInitStruct("POSIX DynShmem Ctl", sz, &found);
 
 	if (!IsUnderPostmaster)
 	{
 		/* Initialize shared memory area */
 		Assert(!found);
 
-		MemSet(dsmpsm, 0, sz);
+		memset(dsmctl, 0, sz);
+		SpinLockInit(&dsm->freelist_lck);
+		dsmctl->size = MAXDSM;
+		/* Variable-size fields sit at the end of the allocation. */
+		dsmctl->freelist = dsmctl + 1;
+		dsmctl->keys = dsmctl->freelist + MAXDSM;
+		memset(dsmctl->freelist, 0xFF, sz);
 	}
 	else
 		Assert(found);
 }
 
 /*
+ * Find a free slot in the freelist, allocate it, and return the offset.
+ *
  *				xxxx0111
  * where x's are unspecified bits.  The two's complement negative is formed
  * by inverting all the bits and adding one.  Inversion gives
@@ -65,7 +94,6 @@ DynShmemShmemInit()
  *				yyyyyy10000
  * and then ANDing with the original value gives
  *				00000010000
-
  */
 static int
 allocate_unset_bit()
@@ -89,30 +117,40 @@ object exists.  Release the spinlock and ftruncate to the correct length.
 }
 
 /*
- * Buffer must have MAXNAME worth of space.
+ * PostgreSQL.<int pid>.<int64 timestamp>.<uint64 key>
  */
 static void
 segname(char *buf, uint64 key)
 {
-	sprintf(buf, "PostgreSQL.%lu", key);
+	static char buf[512];
+
+	/*
+	 * Nothing says pid_t can't be wider than an int, but we're only using
+	 * this as extra defense against the possibility that two postmasters
+	 * start in the same microsecond.
+	 */
+	sprintf(buf,
+			"PostgreSQL.%d.%" INT64_FORMAT ".%" UINT64_FORMAT,
+			(int) PostmasterPID,
+			TimestampTzToIntegerTimestamp(PgStartTime),
+			key);
 }
 
 
 int
 get_seg(void)
 {
-	int32	   *word = dsmpsm->freelist;
 	int32		bit;
 
-	SpinLockAcquire(dsmpsm->freelist_lck);
+	SpinLockAcquire(dsmctl->freelist_lck);
 	offset = allocate_unset_bit();
-	SpinLockRelease(dsmpsm->freelist_lck);
+	SpinLockRelease(dsmctl->freelist_lck);
 
 	/* If the slot is initialized, open the existing object. */
-	if (dsmpsm->keys[offset] != 0)
+	if (dsmctl->keys[offset] != 0)
 	{
-		segname(namebuf, dsmpsm->keys[offset]);
-		fd = shm_open(name, O_RDWR, IPCProtection);
+		;
+		fd = shm_open(segname(dsmctl->keys[offset]), O_RDWR, 0);
 		if (fd == -1)
 			elog(ERROR, "shm_open failed: %m");
 
@@ -120,28 +158,29 @@ get_seg(void)
 	}
 
 	/*
-	 * If the offset is uninitialized, initialize it.  We proect this with a
-	 * lock so another backend so concurrent
+	 * If the offset is uninitialized, initialize it.  We protect this with a
+	 * lock so another backend initializing a different slot will not write the state 
 	 */
 	for (;;)
 	{
 		key = new_random_key();
-		LWLockAcquire(PSMLock, LW_EXCLUSIVE);
-		dsmpsm->keys[offset] = new_random_key;
-		persist_dsmpsm();
-		LWLockRelease(PSMLock);
+		LWLockAcquire(DynShmemInitLock, LW_EXCLUSIVE);
+		dsmctl->keys[offset] = new_random_key;
+		persist_dsmctl();
+		LWLockRelease(DynShmemInitLock);
 
-		segname(namebuf, dsmpsm->keys[offset]);
-		fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, IPCProtection);
+		fd = shm_open(segname(dsmctl->keys[offset]),
+					  O_RDWR | O_CREAT | O_EXCL, IPCProtection);
 		if (fd != -1)
 			return fd;
 
-		/*
-		 * If we collided with an existing segment, generate a new key and try
-		 * again.
-		 */
 		if (errno != EEXIST)
 			elog(ERROR, "shm_open failed: %m");
+
+		/*
+		 * We collided with an existing segment; generate a new key and try
+		 * again.
+		 */
 	}
 }
 
@@ -152,7 +191,7 @@ get_seg(void)
  * that created them, and it is permitted to persist that past reboots.  A
  * semi-recent examples is FreeBSD 6.4 (2008).
  *
- * If we crash after an shm_unlink() starts and before truncate_dsmpsm()
+ * If we crash after an shm_unlink() starts and before truncate_dsmctl()
  * completes, the next startup may will try unlink segments a second time.
  * This is usually harmless, but there is a vanishing possibility that another
  * postmaster running under the same user account manages to choose the same
@@ -166,7 +205,7 @@ dsm_startup()
 	int i;
 	int reclaimed = 0;
 
-	recover_dsmpsm(&keys, &size);
+	recover_dsmctl(&keys, &size);
 
 	for (i = 0; i < size; i++)
 	{
@@ -178,7 +217,7 @@ dsm_startup()
 		if (keys[i] == 0)
 			continue;
 
-		segname(namebuf, key);
+		segname(key);
 		if (shm_unlink(name) == 0)
 			reclaimed++;
 		else if (errno != ENOENT)
@@ -189,7 +228,7 @@ dsm_startup()
 
 	/*
 	 */
-	truncate_dsmpsm();
+	truncate_dsmctl();
 
 	return reclaimed;
 #if 0
@@ -199,27 +238,42 @@ dsm_startup()
 }
 
 /*
+ * Called at postmaster shutdown.  Unlink all segments, which should be on the
+ * freelist and have zero length.  Then unlink the state file.
+ */
+void
+DynShmemShutdown(void)
+{
+	int64	   *key, *end;
+
+	for (key = dsmctl->keys, end = key + dsmctl->size; key < end; key++)
+	{
+		if (*key == 0)			/* See comment in DynShmemStartup(). */
+			continue;
+
+		/* TODO verify the freelist and size assumptions under
+		   USE_ASSERT_CHECKING */
+
+		if (shm_unlink(segname(*key)))
+			elog(WARNING, "shm_unlink failed: %m");
+	}
+}
+
+/*
  * Allocate a new shared memory segment of the specified length and attach it
  * to the current process at a system-chosen address.
  */
 void
-dsm_create(DynElephant *x, Size len)
+DynShmemCreate(DynShmem *x, Size len, int flags)
 {
 	int fd;
-	char *name[MAX_SHM_NAME];
 
-	segname(name, -1);			/* reserve a new name */
-
-	/*
-	 * We presume startup destroyed any lingering memory objects, so we use
-	 * O_EXCL to detect unexpected reuse.
-	 */
-	fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, IPCProtection);
-	if (fd == -1)
-		elog(ERROR, "shm_open failed: %m");
+	x->attached = false;
+	fd = get_seg();
 
 	if (ftruncate(fd, len) != 0)
 		elog(ERROR, "ftruncate failed: %m");
+	x->len = len;
 
 	x->addr = mmap(NULL, len,
 				   PROT_READ | PROT_WRITE,
@@ -227,43 +281,29 @@ dsm_create(DynElephant *x, Size len)
 				   fd, 0);
 	if (x->addr == MAP_FAILED)
 		elog(ERROR, "mmap failed: %m");
+	x->attached = true;
 
 	/*
 	 * XXX if we fail here, we need to reclaim the segment.  Probably need to
-	 * associate segments with resource owners.
+	 * associate segments with resource owners?  
 	 */
 	if (close(fd) != 0)
 		elog(ERROR, "close failed: %m");
 
-	x->len = len;
-}
-
-/*
- * Only the owning process should call after detaching itself.  After this is
- * done, later attempts to attach to the same segment will fail.  It's
- * unspecified
- */
-void
-dsm_destroy(DynElephant *x)
-{
-	if (munmap(x->addr, x->len) != 0)
-		elog(ERROR, "munmap failed: %m");
-
-	if (shm_unlink("/PG") == -1)
-		elog(ERROR, "shm_unlink failed: %m");
 }
 
 /*
  * Attempt to attach a dynamic shared memory area to the current process.
- * This should not normally be called in the owning process, but one can do so
+ * This is mostly for processes other than the creating process; though it's
+ * permitted for the creating process to detach and later re-attach.
  */
 void
-dsm_attach(DynElephant *x)
+DynShmemAttach(DynShmem *x)
 {
 	int fd;
 	void *addr;
 
-	fd = shm_open("/PG", O_RDWR, 0);
+	fd = shm_open(segname(x->key), O_RDWR, 0);
 	if (fd == -1)
 		elog(ERROR, "shm_open failed: %m");
 
@@ -274,19 +314,48 @@ dsm_attach(DynElephant *x)
 	if (addr == MAP_FAILED)
 		elog(ERROR, "mmap failed: %m");
 	if (addr != x->addr)
-		elog(ERROR, "dsm_attach: address mismatch");
+		elog(ERROR, "DynShmemAttach: address mismatch");
 
 	if (close(fd) != 0)
 		elog(ERROR, "close failed: %m");
 }
 
 /*
- * Undo a dsm_attach().  This frees the address space and allows the
- * allocation to be freed when all users have done so.
+ * Undo an earlier DynShmemAttach() or DynShmemCreate() in this process.  This
+ * frees the address space.  If we're the last process to detach, this also
+ * frees the underlying allocation.
  */
 void
-dsm_detach(DynElephant *x)
+DynShmemDetach(DynShmem *x)
 {
+	Assert(x->local_attached);
+
 	if (munmap(x->addr, x->len) != 0)
 		elog(ERROR, "munmap failed: %m");
+	x->attached = false;
 }
+
+/*
+ * Call this after every attached process has called DynShmemDetach().  This
+ * will free all associated resources.
+
+Call this after every attached process has ca
+ * Only the owning process should call after detaching itself.  After this is
+ * done, later attempts to attach to the same segment will fail.  It's
+ * unspecified
+ */
+void
+DynShmemDestroy(DynShmem *x)
+{
+	int fd;
+
+	if (x->addr != NULL)
+		
+
+	dsm_freelist_put();
+
+	fd = shm_open(segname(x->key), O_RDWR, 0);
+	if (fd == -1)
+		elog(ERROR, "shm_open failed: %m");
+}
+

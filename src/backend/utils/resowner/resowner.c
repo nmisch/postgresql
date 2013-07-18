@@ -373,6 +373,16 @@ ResourceOwnerReleaseInternal(ResourceOwner owner,
 			FileClose(owner->files[owner->nfiles - 1]);
 		}
 
+#if 0
+		/* Ditto for dynamic shared memory */
+		while (owner->ndynshmem > 0)
+		{
+			if (isCommit)
+				PrintDynShmemLeakWarning(owner->dynshmem[owner->ndynshmem - 1]);
+			DynShmemDestroy(owner->dynshmem[owner->ndynshmem - 1]);
+		}
+#endif
+
 		/* Clean up index scans too */
 		ReleaseResources_hash();
 	}

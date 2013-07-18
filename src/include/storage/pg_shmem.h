@@ -80,24 +80,50 @@ extern void PGSharedMemoryReAttach(void);
 
 #endif
 
-/* pg_shmem.c */
+/* pg_shmem.c - permanent shared memory available to all backends */
 extern PGShmemHeader *PGSharedMemoryCreate(Size size, bool makePrivate,
 					 int port);
 extern bool PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2);
 extern void PGSharedMemoryDetach(void);
 
-/* pg_dynshmem.c */
+/* pg_dynshmem.c - on-demand shared memory */
 typedef struct DynShmem
 {
-	pid_t	owner;				/* PID that created (and will delete) */
-	int		nr;					/* distinguish one owner from another */
-	void   *addr;				/* where to map */
-	Size	len;
-} DynElephant;
+	int64	key;				/* distinguish shm areas of this postmaster */
+	void   *addr;				/* where mapped, or where to map) */
+	Size	len;				/* allocation length */
+	bool	local_attached;		/* current process has mapped at addr */
+} DynShmem;
 
-extern void dsm_create(DynElephant *x, Size len);
-extern void dsm_destroy(DynElephant *x);
-extern void dsm_attach(DynElephant *x);
-extern void dsm_detach(DynElephant *x);
+/*** Flags for DynShmemCreate() ***/
+/*
+ * You must specify one of DYNSHMEM_RESOWNER or DYNSHMEM_PERMANENT.
+ * DYNSHMEM_RESOWNER ties the segment to the current resource owner;
+ * (sub)transaction abort will automatically detach it, and transaction commit
+ * will complain and detach it if that is not already done.
+ * DYNSHMEM_PERMANENT attachments last until the process exits or until
+ * explicitly detached.
+ */
+#define DYNSHMEM_RESOWNER				0x0001
+#define DYNSHMEM_PERMANENT				0x0002
+/*
+ * Flag indicating that the content of the region is position-independent.
+ * The system may forgo efforts to place the memory at the same address in
+ * every process.
+ */
+#define DYNSHMEM_POSITION_INDEPENDENT	0x0004
+/*
+ * Flag indicating that post-fork() attachments should be possible.  When
+ * DYNSHMEM_POSITION_INDEPENDENT is also specified, this allocation will draw
+ * from a reserved pool of address space to ensure that every process can map
+ * at the same address.  The request will fail if that pool lacks sufficient
+ * free space.
+ */
+#define DYNSHMEM_POST_FORK				0x0008
+
+extern void dsm_create(DynShmem *x, Size len);
+extern void dsm_destroy(DynShmem *x);
+extern void dsm_attach(DynShmem *x);
+extern void dsm_detach(DynShmem *x);
 
 #endif   /* PG_SHMEM_H */

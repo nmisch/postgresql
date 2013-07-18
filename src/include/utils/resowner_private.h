@@ -80,4 +80,6 @@ extern void ResourceOwnerRememberFile(ResourceOwner owner,
 extern void ResourceOwnerForgetFile(ResourceOwner owner,
 						File file);
 
+/* support for dynamic shared memory management */
+
 #endif   /* RESOWNER_PRIVATE_H */

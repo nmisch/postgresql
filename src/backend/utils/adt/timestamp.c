@@ -1289,8 +1289,10 @@ GetCurrentTimestamp(void)
  * GetCurrentIntegerTimestamp -- get the current operating system time as int64
  *
  * Result is the number of milliseconds since the Postgres epoch. If compiled
- * with --enable-integer-datetimes, this is identical to GetCurrentTimestamp(),
- * and is implemented as a macro.
+ * with --enable-integer-datetimes, this would mirror GetCurrentTimestamp()
+ * and is implemented as a macro.  Otherwise, this is essentially equivalent
+ * to TimestampTzToIntegerTimestamp(GetCurrentTimestamp()), except that it
+ * cannot lose precision to rounding.
  */
 #ifndef HAVE_INT64_TIMESTAMP
 int64
@@ -1326,6 +1328,23 @@ IntegerTimestampToTimestampTz(int64 timestamp)
 	result += (timestamp % USECS_PER_SEC) / 1000000.0;
 
 	return result;
+}
+
+int64
+TimestampTzToIntegerTimestamp(TimestampTz timestamp)
+{
+	int64		result;
+	struct timeval tp;
+
+	gettimeofday(&tp, NULL);
+
+	result = (int64) tp.tv_sec -
+		((POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * SECS_PER_DAY);
+
+	result = (result * USECS_PER_SEC) + tp.tv_usec;
+
+	return (int64) (timestamp * 1000000.0)
+
 }
 #endif
 
