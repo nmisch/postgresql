@@ -81,5 +81,8 @@ extern void ResourceOwnerForgetFile(ResourceOwner owner,
 						File file);
 
 /* support for dynamic shared memory management */
+extern void ResourceOwnerEnlargeDynShmems(ResourceOwner owner);
+extern void ResourceOwnerRememberDynShmem(ResourceOwner owner, int offset);
+extern void ResourceOwnerForgetDynShmem(ResourceOwner owner, int offset);
 
 #endif   /* RESOWNER_PRIVATE_H */

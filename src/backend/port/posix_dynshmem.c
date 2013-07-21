@@ -28,15 +28,17 @@
  */
 typedef struct DynShmemControl
 {
-	int size;				/* size of keys/freelist arrays */
+	int size;				/* size of keys/refcnts arrays */
 
 	/*
-	 * Pseudorandom keys used to form POSIX shm paths.  If you mark a slot
-	 * used in the freelist, you may read that slot without a lock.  Modifying
-	 * a slot requires DynShmemInitLock.  (This is unnecessary in some cases,
-	 * but this rule is simple and applies to a slow path anyway.)  Each slot
-	 * begins as zero.  When a particular slot is needed for the first time,
-	 * the requesting backend initializes the slot.
+	 * Pseudorandom keys used to form POSIX shm paths.  After incrementing the
+	 * associated refcnt, you may read a slot without a lock until such time
+	 * as you decrement the refcnt again.  While holding DynShmemInitLock, you
+	 * may read or write any slot.  Each slot begins as zero.  When a
+	 * particular slot is needed for the first time, the requesting backend
+	 * initializes the slot.  (These rules are somewhat stricter than the code
+	 * needs at the moment, but there wouldn't presently be much advantage
+	 * from weakening them.)
 	 *
 	 * We could just use a incrementing integer, but that would make us
 	 * vulnerable to denial of service: a hostile local user could predict the
@@ -45,17 +47,17 @@ typedef struct DynShmemControl
 	 */
 	uint64 *keys;
 
-	uint32 *freelist;		/* bitmap of unused offsets */
-	slock_t freelist_lck;	/* acquire to read or modify freelist */
+	uint32 *refcnts;		/* bitmap of unused offsets */
+	slock_t refcnt_lck;		/* acquire to read or modify refcnts */
 } DynShmemControl;
 
-struct DynShmemControl *dsmctl;
+DynShmemControl *dsmctl;
 
 Size
 DynShmemShmemSize(void)
 {
 	return sizeof(struct DSMCTL) +
-		MAXDSM * (sizeof(*dsmctl->freelist) + sizeof(*dsmctl->keys));
+		MAXDSM * (sizeof(*dsmctl->refcnts) + sizeof(*dsmctl->keys));
 }
 
 void
@@ -72,19 +74,21 @@ DynShmemShmemInit()
 		Assert(!found);
 
 		memset(dsmctl, 0, sz);
-		SpinLockInit(&dsm->freelist_lck);
+		SpinLockInit(&dsm->refcnt_lck);
 		dsmctl->size = MAXDSM;
 		/* Variable-size fields sit at the end of the allocation. */
-		dsmctl->freelist = dsmctl + 1;
-		dsmctl->keys = dsmctl->freelist + MAXDSM;
-		memset(dsmctl->freelist, 0xFF, sz);
+		dsmctl->refcnts = dsmctl + 1;
+		dsmctl->keys = dsmctl->refcnts + MAXDSM;
+		memset(dsmctl->refcnts, 0xFF, sz);
 	}
 	else
 		Assert(found);
 }
 
 /*
- * Find a free slot in the freelist, allocate it, and return the offset.
+ * Find a free slot, increment its refcnt, and return the offset.  Remember
+ * this slot in the current resource owner
+
  *
  *				xxxx0111
  * where x's are unspecified bits.  The two's complement negative is formed
@@ -96,24 +100,30 @@ DynShmemShmemInit()
  *				00000010000
  */
 static int
-allocate_unset_bit()
+find_free_slot(void)
 {
-	/* Find the first free entry. */
-	for (wordnum = 0; wordnum < nwords; ++wordnum)
+	volatile DynShmemControl *ctl = dsmctl;
+	int i;
+
+	ResourceOwnerEnlargeDynShmems(CurrentResourceOwner);
+
+	SpinLockAcquire(&ctl->refcnt_lck);
+	for (i = 0; i < ctl->size; i++)
 	{
-		int32		w = dspsm->freelist[wordnum];
-
-
-		if (w != 0xFFFFFFFF)
+		if (ctl->refcnt[i] == 0)
 		{
-			
+			ctl->refcnt[i]++;
+			break;
 		}
 	}
+	SpinLockRelease(&ctl->refcnt_lck);
 
+	if (i == ctl->size)
+		elog(ERROR, "no free DynShmem slots");
 
-, and inspect its cell.  If the cell has valid content that object
-object exists.  Release the spinlock and ftruncate to the correct length.
+	ResourceOwnerRememberDynShmem(CurrentResourceOwner, i);
 
+	return i;
 }
 
 /*
@@ -136,20 +146,24 @@ segname(char *buf, uint64 key)
 			key);
 }
 
+static void
+persist_dsmctl(void)
+{
+	/* TODO */
+}
 
-int
+
+static int
 get_seg(void)
 {
+	int			offset;
 	int32		bit;
 
-	SpinLockAcquire(dsmctl->freelist_lck);
-	offset = allocate_unset_bit();
-	SpinLockRelease(dsmctl->freelist_lck);
+	offset = find_free_slot();
 
 	/* If the slot is initialized, open the existing object. */
 	if (dsmctl->keys[offset] != 0)
 	{
-		;
 		fd = shm_open(segname(dsmctl->keys[offset]), O_RDWR, 0);
 		if (fd == -1)
 			elog(ERROR, "shm_open failed: %m");
@@ -157,10 +171,7 @@ get_seg(void)
 		return fd;
 	}
 
-	/*
-	 * If the offset is uninitialized, initialize it.  We protect this with a
-	 * lock so another backend initializing a different slot will not write the state 
-	 */
+	/* Otherwise, initialize the slot. */
 	for (;;)
 	{
 		key = new_random_key();
@@ -198,6 +209,7 @@ get_seg(void)
  * key in the mean time.  XXX could we include something like the data
  * directory or postmaster PID in the key to prevent this?
  */
+#if 0
 int
 dsm_startup()
 {
@@ -236,6 +248,7 @@ dsm_startup()
 		elog(DEBUG1, "reclaimed %d shared memory segments", );
 #endif
 }
+#endif
 
 /*
  * Called at postmaster shutdown.  Unlink all segments, which should be on the
@@ -246,6 +259,10 @@ DynShmemShutdown(void)
 {
 	int64	   *key, *end;
 
+	/*
+	 * No DynShmemInitLock acquisition; all ordinary backends should be gone
+	 * already, so nobody else should be manipulating dynamic shared memory.
+	 */
 	for (key = dsmctl->keys, end = key + dsmctl->size; key < end; key++)
 	{
 		if (*key == 0)			/* See comment in DynShmemStartup(). */
@@ -268,7 +285,10 @@ DynShmemCreate(DynShmem *x, Size len, int flags)
 {
 	int fd;
 
-	x->attached = false;
+	/* Only supported case for the moment. */
+	Assert(flags == DYNSHMEM_RESOWNER);
+
+	x->local_attached = false;
 	fd = get_seg();
 
 	if (ftruncate(fd, len) != 0)
