@@ -79,6 +79,7 @@ typedef enum LWLockId
 	SerializablePredicateLockListLock,
 	OldSerXidLock,
 	SyncRepLock,
+	BackgroundWorkerLock,
 	DynShmemInitLock,
 	/* Individual lock IDs end here */
 	FirstBufMappingLock,
