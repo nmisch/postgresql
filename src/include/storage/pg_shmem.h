@@ -114,16 +114,15 @@ typedef struct DynShmem
 #define DYNSHMEM_POSITION_INDEPENDENT	0x0004
 /*
  * Flag indicating that post-fork() attachments should be possible.  When
- * DYNSHMEM_POSITION_INDEPENDENT is also specified, this allocation will draw
+ * DYNSHMEM_POSITION_INDEPENDENT is not specified, this allocation will draw
  * from a reserved pool of address space to ensure that every process can map
  * at the same address.  The request will fail if that pool lacks sufficient
  * free space.
  */
 #define DYNSHMEM_POST_FORK				0x0008
 
-extern void dsm_create(DynShmem *x, Size len);
-extern void dsm_destroy(DynShmem *x);
-extern void dsm_attach(DynShmem *x);
-extern void dsm_detach(DynShmem *x);
+extern void DynShmemCreate(DynShmem *x, Size len, int flags);
+extern void DynShmemAttach(DynShmem *x);
+extern void DynShmemDetach(DynShmem *x);
 
 #endif   /* PG_SHMEM_H */
