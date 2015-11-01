@@ -94,8 +94,8 @@ typedef struct SlruSharedData
 	int			cur_lru_count;
 
 	/*
-	 * latest_page_number is the page number of the current end of the log;
-	 * this is not critical data, since we use it only to avoid swapping out
+	 * latest_page_number is the page number of the current end of the log; we
+	 * use it for a SimpleLruTruncate() safety check and to avoid swapping out
 	 * the latest page.
 	 */
 	int			latest_page_number;

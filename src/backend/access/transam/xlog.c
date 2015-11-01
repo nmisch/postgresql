@@ -6331,9 +6331,7 @@ StartupXLOG(void)
 	StartupReorderBuffer();
 
 	/*
-	 * Startup MultiXact.  We need to do this early for two reasons: one is
-	 * that we might try to access multixacts when we do tuple freezing, and
-	 * the other is we need its state initialized because we attempt
+	 * Startup MultiXact.  We need to do this early because we attempt
 	 * truncation during restartpoints.
 	 */
 	StartupMultiXact();
