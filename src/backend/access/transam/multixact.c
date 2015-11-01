@@ -3009,9 +3009,6 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	 * going to attempt to read the offsets page to determine where to
 	 * truncate the members SLRU.  So we first scan the directory to determine
 	 * the earliest offsets page number that we can read without error.
-	 *
-	 * NB: It's also possible that the page that oldestMulti is on has already
-	 * been truncated away, and we crashed before updating oldestMulti.
 	 */
 	trunc.earliestExistingPage = -1;
 	SlruScanDirectory(MultiXactOffsetCtl, SlruScanDirCbFindEarliest, &trunc);
