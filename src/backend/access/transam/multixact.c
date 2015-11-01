@@ -2398,7 +2398,7 @@ MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
 			ereport(LOG,
 					(errmsg("performing legacy multixact truncation"),
 					 errdetail("Legacy truncations are sometimes performed when replaying WAL from an older primary."),
-					 errhint("Upgrade the primary, it is susceptible to data corruption.")));
+					 errhint("Upgrade the primary; it is susceptible to data corruption.")));
 			TruncateMultiXact(oldestMulti, oldestMultiDB, true);
 		}
 
