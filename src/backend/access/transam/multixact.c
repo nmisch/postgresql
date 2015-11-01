@@ -2019,7 +2019,7 @@ StartupMultiXact(void)
 void
 TrimMultiXact(void)
 {
-	MultiXactId multi = MultiXactState->nextMXact;
+	MultiXactId nextMXact = MultiXactState->nextMXact;
 	MultiXactOffset offset = MultiXactState->nextOffset;
 	MultiXactId	oldestMXact;
 	int			pageno;
@@ -2033,20 +2033,20 @@ TrimMultiXact(void)
 	/*
 	 * (Re-)Initialize our idea of the latest page number for offsets.
 	 */
-	pageno = MultiXactIdToOffsetPage(multi);
+	pageno = MultiXactIdToOffsetPage(nextMXact);
 	MultiXactOffsetCtl->shared->latest_page_number = pageno;
 
 	/*
 	 * Zero out the remainder of the current offsets page.  See notes in
 	 * TrimCLOG() for motivation.
 	 */
-	entryno = MultiXactIdToOffsetEntry(multi);
+	entryno = MultiXactIdToOffsetEntry(nextMXact);
 	if (entryno != 0)
 	{
 		int			slotno;
 		MultiXactOffset *offptr;
 
-		slotno = SimpleLruReadPage(MultiXactOffsetCtl, pageno, true, multi);
+		slotno = SimpleLruReadPage(MultiXactOffsetCtl, pageno, true, nextMXact);
 		offptr = (MultiXactOffset *) MultiXactOffsetCtl->shared->page_buffer[slotno];
 		offptr += entryno;
 
@@ -2959,9 +2959,9 @@ SlruScanDirCbRemoveMembers(SlruCtl ctl, char *filename, int segpage,
 void
 TruncateMultiXact(void)
 {
-	MultiXactId oldestMXact;
+	MultiXactId oldestMulti;
+	MultiXactId nextMulti;
 	MultiXactOffset oldestOffset;
-	MultiXactId		nextMXact;
 	MultiXactOffset	nextOffset;
 	MembersLiveRange range;
 
@@ -2969,27 +2969,27 @@ TruncateMultiXact(void)
 		   !IsPostmasterEnvironment);
 
 	LWLockAcquire(MultiXactGenLock, LW_SHARED);
-	oldestMXact = MultiXactState->lastCheckpointedOldest;
-	nextMXact = MultiXactState->nextMXact;
+	oldestMulti = MultiXactState->lastCheckpointedOldest;
+	nextMulti = MultiXactState->nextMXact;
 	nextOffset = MultiXactState->nextOffset;
 	LWLockRelease(MultiXactGenLock);
-	Assert(MultiXactIdIsValid(oldestMXact));
+	Assert(MultiXactIdIsValid(oldestMulti));
 
 	/*
 	 * First, compute the safe truncation point for MultiXactMember. This is
 	 * the starting offset of the oldest multixact.
 	 *
 	 * Due to bugs in early releases of PostgreSQL 9.3.X and 9.4.X,
-	 * oldestMXact might point to a multixact that does not exist.  Call
+	 * oldestMulti might point to a multixact that does not exist.  Call
 	 * DetermineSafeOldestOffset() to emit the message about disabled member
-	 * wraparound protection.  Autovacuum will eventually advance oldestMXact
+	 * wraparound protection.  Autovacuum will eventually advance oldestMulti
 	 * to a value that does exist.
 	 */
-	if (oldestMXact == nextMXact)
+	if (oldestMulti == nextMulti)
 		oldestOffset = nextOffset;		/* there are NO MultiXacts */
-	else if (!find_multixact_start(oldestMXact, &oldestOffset))
+	else if (!find_multixact_start(oldestMulti, &oldestOffset))
 	{
-		DetermineSafeOldestOffset(oldestMXact);
+		DetermineSafeOldestOffset(oldestMulti);
 		return;
 	}
 
@@ -3010,19 +3010,19 @@ TruncateMultiXact(void)
 	/*
 	 * Now we can truncate MultiXactOffset.  We step back one multixact to
 	 * avoid passing a cutoff page that hasn't been created yet in the rare
-	 * case that oldestMXact would be the first item on a page and oldestMXact
-	 * == nextMXact.  In that case, if we didn't subtract one, we'd trigger
+	 * case that oldestMulti would be the first item on a page and oldestMulti
+	 * == nextMulti.  In that case, if we didn't subtract one, we'd trigger
 	 * SimpleLruTruncate's wraparound detection.
 	 */
 	SimpleLruTruncate(MultiXactOffsetCtl,
-				  MultiXactIdToOffsetPage(PreviousMultiXactId(oldestMXact)));
+				  MultiXactIdToOffsetPage(PreviousMultiXactId(oldestMulti)));
 
 	/*
 	 * Now, and only now, we can advance the stop point for multixact members.
 	 * If we did it any sooner, the segments we deleted above might already
 	 * have been overwritten with new members.  That would be bad.
 	 */
-	DetermineSafeOldestOffset(oldestMXact);
+	DetermineSafeOldestOffset(oldestMulti);
 }
 
 /*
