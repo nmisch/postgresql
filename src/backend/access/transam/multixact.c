@@ -2573,9 +2573,9 @@ GetOldestMultiXactId(void)
 static bool
 SetOffsetVacuumLimit(void)
 {
-	MultiXactId oldestMultiXactId;
+	MultiXactId	oldestMultiXactId;
 	MultiXactId nextMXact;
-	MultiXactOffset oldestOffset = 0;	/* placate compiler */
+	MultiXactOffset oldestOffset = 0;		/* placate compiler */
 	MultiXactOffset prevOldestOffset;
 	MultiXactOffset nextOffset;
 	bool		oldestOffsetKnown = false;
@@ -2608,8 +2608,8 @@ SetOffsetVacuumLimit(void)
 	if (oldestMultiXactId == nextMXact)
 	{
 		/*
-		 * When the next multixact gets created, it will be stored at the next
-		 * offset.
+		 * When the next multixact gets created, it will be stored at the
+		 * next offset.
 		 */
 		oldestOffset = nextOffset;
 		oldestOffsetKnown = true;
@@ -2617,9 +2617,9 @@ SetOffsetVacuumLimit(void)
 	else
 	{
 		/*
-		 * Figure out where the oldest existing multixact's offsets are
-		 * stored. Due to bugs in early release of PostgreSQL 9.3.X and 9.4.X,
-		 * the supposedly-earliest multixact might not really exist.  We are
+		 * Figure out where the oldest existing multixact's offsets are stored.
+		 * Due to bugs in early release of PostgreSQL 9.3.X and 9.4.X, the
+		 * supposedly-earliest multixact might not really exist.  We are
 		 * careful not to fail in that case.
 		 */
 		oldestOffsetKnown =
@@ -2628,7 +2628,7 @@ SetOffsetVacuumLimit(void)
 		if (oldestOffsetKnown)
 			ereport(DEBUG1,
 					(errmsg("oldest MultiXactId member is at offset %u",
-							oldestOffset)));
+					oldestOffset)));
 		else
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are disabled because oldest checkpointed MultiXact %u does not exist on disk",
@@ -2677,7 +2677,7 @@ SetOffsetVacuumLimit(void)
 	LWLockRelease(MultiXactGenLock);
 
 	/*
-	 * Do we need an emergency autovacuum?	If we're not sure, assume yes.
+	 * Do we need an emergency autovacuum?  If we're not sure, assume yes.
 	 */
 	return !oldestOffsetKnown ||
 		(nextOffset - oldestOffset > MULTIXACT_MEMBER_SAFE_THRESHOLD);
@@ -2942,7 +2942,7 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	MultiXactId nextMulti;
 	MultiXactOffset newOldestOffset;
 	MultiXactOffset oldestOffset;
-	MultiXactOffset nextOffset;
+	MultiXactOffset	nextOffset;
 
 	/*
 	 * Need to allow being called in recovery for backwards compatibility,
