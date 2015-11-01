@@ -2198,7 +2198,8 @@ MultiXactSetNextMXact(MultiXactId nextMulti,
 /*
  * Determine the last safe MultiXactId to allocate given the currently oldest
  * datminmxid (ie, the oldest MultiXactId that might exist in any database
- * of our cluster), and the OID of the (or a) database with that value.
+ * of our cluster), and the OID of the (or a) database with that value.  When
+ * past recovery, also determine the last safe MultiXactOffset to allocate.
  */
 void
 SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
@@ -2215,9 +2216,7 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 	/*
 	 * We pretend that a wrap will happen halfway through the multixact ID
 	 * space, but that's not really true, because multixacts wrap differently
-	 * from transaction IDs.  Note that, separately from any concern about
-	 * multixact IDs wrapping, we must ensure that multixact members do not
-	 * wrap.  Limits for that are set in DetermineSafeOldestOffset, not here.
+	 * from transaction IDs.
 	 */
 	multiWrapLimit = oldest_datminmxid + (MaxMultiXactId >> 1);
 	if (multiWrapLimit < FirstMultiXactId)
@@ -2261,7 +2260,7 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 	if (multiVacLimit < FirstMultiXactId)
 		multiVacLimit += FirstMultiXactId;
 
-	/* Grab lock for just long enough to set the new limit values */
+	/* Grab lock for just long enough to set the new MultiXactId bounds */
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 	MultiXactState->oldestMultiXactId = oldest_datminmxid;
 	MultiXactState->oldestMultiXactDB = oldest_datoid;
