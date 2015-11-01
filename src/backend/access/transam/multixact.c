@@ -2983,9 +2983,9 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	 * the starting offset of the oldest multixact.
 	 *
 	 * Due to bugs in early releases of PostgreSQL 9.3.X and 9.4.X,
-	 * oldestMXact might point to a multixact that does not exist.  Call
+	 * oldestMulti might point to a multixact that does not exist.  Call
 	 * DetermineSafeOldestOffset() to emit the message about disabled member
-	 * wraparound protection.  Autovacuum will eventually advance oldestMXact
+	 * wraparound protection.  Autovacuum will eventually advance oldestMulti
 	 * to a value that does exist.
 	 */
 	if (oldestMulti == nextMulti)
