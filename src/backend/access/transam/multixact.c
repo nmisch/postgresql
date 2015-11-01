@@ -2989,10 +2989,7 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	 * to a value that does exist.
 	 */
 	if (oldestMulti == nextMulti)
-	{
-		/* there are NO MultiXacts */
-		oldestOffset = nextOffset;
-	}
+		oldestOffset = nextOffset;		/* there are NO MultiXacts */
 	else if (!find_multixact_start(oldestMulti, &oldestOffset))
 	{
 		LWLockRelease(MultiXactTruncationLock);
@@ -3006,10 +3003,7 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	 * the sequence of segment files on disk.
 	 */
 	if (newOldestMulti == nextMulti)
-	{
-		/* there are NO MultiXacts */
-		newOldestOffset = nextOffset;
-	}
+		oldestOffset = nextOffset;		/* there are NO MultiXacts */
 	else if (!find_multixact_start(newOldestMulti, &newOldestOffset))
 	{
 		ereport(LOG,
