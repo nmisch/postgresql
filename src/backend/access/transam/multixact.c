@@ -213,9 +213,9 @@ typedef struct MultiXactStateData
 	Oid			oldestMultiXactDB;
 
 	/*
-	 * Oldest multixact offset that is potentially referenced by a multixact
-	 * referenced by a relation.  We don't always know this value, so there's
-	 * a flag here to indicate whether or not we currently do.
+	 * Oldest multixact offset that is potentially referenced by a
+	 * multixact referenced by a relation.  We don't always know this value,
+	 * so there's a flag here to indicate whether or not we currently do.
 	 */
 	MultiXactOffset oldestOffset;
 	bool		oldestOffsetKnown;
@@ -2021,7 +2021,7 @@ TrimMultiXact(void)
 {
 	MultiXactId nextMXact;
 	MultiXactOffset offset;
-	MultiXactId oldestMXact;
+	MultiXactId	oldestMXact;
 	Oid			oldestMXactDB;
 	int			pageno;
 	int			entryno;
