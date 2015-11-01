@@ -134,7 +134,6 @@ static int	SlruSelectLRUPage(SlruCtl ctl, int pageno);
 
 static bool SlruScanDirCbDeleteCutoff(SlruCtl ctl, char *filename,
 						  int segpage, void *data);
-static void SlruInternalDeleteSegment(SlruCtl ctl, char *filename);
 
 /*
  * Initialization of shared memory
@@ -1076,7 +1075,7 @@ SlruSelectLRUPage(SlruCtl ctl, int pageno)
  * Flush dirty pages to disk during checkpoint or database shutdown
  */
 void
-SimpleLruFlush(SlruCtl ctl, bool allow_redirtied)
+SimpleLruFlush(SlruCtl ctl, bool checkpoint)
 {
 	SlruShared	shared = ctl->shared;
 	SlruFlushData fdata;
@@ -1097,11 +1096,11 @@ SimpleLruFlush(SlruCtl ctl, bool allow_redirtied)
 		SlruInternalWritePage(ctl, slotno, &fdata);
 
 		/*
-		 * In some places (e.g. checkpoints), we cannot assert that the slot
-		 * is clean now, since another process might have re-dirtied it
-		 * already.  That's okay.
+		 * When called during a checkpoint, we cannot assert that the slot is
+		 * clean now, since another process might have re-dirtied it already.
+		 * That's okay.
 		 */
-		Assert(allow_redirtied ||
+		Assert(checkpoint ||
 			   shared->page_status[slotno] == SLRU_PAGE_EMPTY ||
 			   (shared->page_status[slotno] == SLRU_PAGE_VALID &&
 				!shared->page_dirty[slotno]));
@@ -1211,14 +1210,8 @@ restart:;
 	(void) SlruScanDirectory(ctl, SlruScanDirCbDeleteCutoff, &cutoffPage);
 }
 
-/*
- * Delete an individual SLRU segment, identified by the filename.
- *
- * NB: This does not touch the SLRU buffers themselves, callers have to ensure
- * they either can't yet contain anything, or have already been cleaned out.
- */
-static void
-SlruInternalDeleteSegment(SlruCtl ctl, char *filename)
+void
+SlruDeleteSegment(SlruCtl ctl, char *filename)
 {
 	char		path[MAXPGPATH];
 
@@ -1226,64 +1219,6 @@ SlruInternalDeleteSegment(SlruCtl ctl, char *filename)
 	ereport(DEBUG2,
 			(errmsg("removing file \"%s\"", path)));
 	unlink(path);
-}
-
-/*
- * Delete an individual SLRU segment, identified by the segment number.
- */
-void
-SlruDeleteSegment(SlruCtl ctl, int segno)
-{
-	SlruShared	shared = ctl->shared;
-	int			slotno;
-	char		path[MAXPGPATH];
-	bool		did_write;
-
-	/* Clean out any possibly existing references to the segment. */
-	LWLockAcquire(shared->ControlLock, LW_EXCLUSIVE);
-restart:
-	did_write = false;
-	for (slotno = 0; slotno < shared->num_slots; slotno++)
-	{
-		int			pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
-
-		if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
-			continue;
-
-		/* not the segment we're looking for */
-		if (pagesegno != segno)
-			continue;
-
-		/* If page is clean, just change state to EMPTY (expected case). */
-		if (shared->page_status[slotno] == SLRU_PAGE_VALID &&
-			!shared->page_dirty[slotno])
-		{
-			shared->page_status[slotno] = SLRU_PAGE_EMPTY;
-			continue;
-		}
-
-		/* Same logic as SimpleLruTruncate() */
-		if (shared->page_status[slotno] == SLRU_PAGE_VALID)
-			SlruInternalWritePage(ctl, slotno, NULL);
-		else
-			SimpleLruWaitIO(ctl, slotno);
-
-		did_write = true;
-	}
-
-	/*
-	 * Be extra careful and re-check. The IO functions release the control
-	 * lock, so new pages could have been read in.
-	 */
-	if (did_write)
-		goto restart;
-
-	snprintf(path, MAXPGPATH, "%s/%04X", ctl->Dir, segno);
-	ereport(DEBUG2,
-			(errmsg("removing file \"%s\"", path)));
-	unlink(path);
-
-	LWLockRelease(shared->ControlLock);
 }
 
 /*
@@ -1314,7 +1249,7 @@ SlruScanDirCbDeleteCutoff(SlruCtl ctl, char *filename, int segpage, void *data)
 	int			cutoffPage = *(int *) data;
 
 	if (ctl->PagePrecedes(segpage, cutoffPage))
-		SlruInternalDeleteSegment(ctl, filename);
+		SlruDeleteSegment(ctl, filename);
 
 	return false;				/* keep going */
 }
@@ -1326,7 +1261,7 @@ SlruScanDirCbDeleteCutoff(SlruCtl ctl, char *filename, int segpage, void *data)
 bool
 SlruScanDirCbDeleteAll(SlruCtl ctl, char *filename, int segpage, void *data)
 {
-	SlruInternalDeleteSegment(ctl, filename);
+	SlruDeleteSegment(ctl, filename);
 
 	return false;				/* keep going */
 }
