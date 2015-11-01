@@ -1151,9 +1151,7 @@ SimpleLruTruncate(SlruCtl ctl, int cutoffPage)
 
 	/*
 	 * Scan shared memory and remove any pages preceding the cutoff page, to
-	 * ensure we won't rewrite them later.  (Since this is normally called in
-	 * or just after a checkpoint, any dirty pages should have been flushed
-	 * already ... we're just being extra careful here.)
+	 * ensure we won't rewrite them later.
 	 */
 	LWLockAcquire(shared->ControlLock, LW_EXCLUSIVE);
 

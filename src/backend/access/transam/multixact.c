@@ -2277,19 +2277,18 @@ SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid)
 	 (errmsg("MultiXactId wrap limit is %u, limited by database with OID %u",
 			 multiWrapLimit, oldest_datoid)));
 
-	/*
-	 * Computing the actual limits is only possible once the data directory is
-	 * in a consistent state. There's no need to compute the limits while
-	 * still replaying WAL - no decisions about new multis are made even
-	 * though multixact creations might be replayed. So we'll only do further
-	 * checks after TrimMultiXact() has been called.
-	 */
+	/* Before the TrimMultiXact() call at end of recovery, skip the rest. */
 	if (!MultiXactState->finishedStartup)
 		return;
-
 	Assert(!InRecovery);
 
-	/* Set limits for offset vacuum. */
+	/*
+	 * Setting MultiXactState->oldestOffset entails a find_multixact_start()
+	 * call, which is only possible once the data directory is in a consistent
+	 * state. There's no need for an offset limit while still replaying WAL;
+	 * no decisions about new multis are made even though multixact creations
+	 * might be replayed.
+	 */
 	needs_offset_vacuum = SetOffsetVacuumLimit();
 
 	/*
@@ -2362,6 +2361,12 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 		debug_elog3(DEBUG2, "MultiXact: setting next multi to %u", minMulti);
 		MultiXactState->nextMXact = minMulti;
 	}
+
+	/*
+	 * MultiXactOffsetPrecedes() gives the wrong answer if nextOffset would
+	 * advance more than 2^31 between calls.  Since we get a call for each
+	 * XLOG_MULTIXACT_CREATE_ID, that should never happen.
+	 */
 	if (MultiXactOffsetPrecedes(MultiXactState->nextOffset, minMultiOffset))
 	{
 		debug_elog3(DEBUG2, "MultiXact: setting next offset to %u",
@@ -2372,10 +2377,8 @@ MultiXactAdvanceNextMXact(MultiXactId minMulti,
 }
 
 /*
- * Update our oldestMultiXactId value, but only if it's more recent than what
- * we had.
- *
- * This may only be called during WAL replay.
+ * Update our oldestMultiXactId value, but only if it's more recent than
+ * what we had.  This may only be called during WAL replay.
  */
 void
 MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
@@ -3104,8 +3107,13 @@ MultiXactOffsetPagePrecedes(int page1, int page2)
 }
 
 /*
- * Decide which of two MultiXactMember page numbers is "older" for truncation
- * purposes.  There is no "invalid offset number" so use the numbers verbatim.
+ * Dummy notion of which of two MultiXactMember page numbers is "older".
+ *
+ * Due to the MultiXactOffsetPrecedes() specification, this function's result
+ * is meaningless unless the system is preserving less than 2^31 members.  It
+ * is adequate for SlruSelectLRUPage() guessing the cheapest slot to reclaim.
+ * Do not pass MultiXactMemberCtl to any of the functions that use the
+ * PagePrecedes callback in other ways.
  */
 static bool
 MultiXactMemberPagePrecedes(int page1, int page2)
@@ -3150,6 +3158,10 @@ MultiXactIdPrecedesOrEquals(MultiXactId multi1, MultiXactId multi2)
 
 /*
  * Decide which of two offsets is earlier.
+ *
+ * Avoid calling this function.  pg_multixact/members can preserve almost 2^32
+ * members at any given time, but this function is transitive only when the
+ * system is preserving less than 2^31 members.
  */
 static bool
 MultiXactOffsetPrecedes(MultiXactOffset offset1, MultiXactOffset offset2)

@@ -2192,10 +2192,8 @@ GetOldestSafeDecodingTransactionId(void)
 
 /*
  * GetVirtualXIDsDelayingChkpt -- Get the VXIDs of transactions that are
- * delaying checkpoint because they have critical actions in progress.
- *
- * Constructs an array of VXIDs of transactions that are currently in commit
- * critical sections, as shown by having delayChkpt set in their PGXACT.
+ * delaying checkpoint because they have critical actions in progress, as
+ * shown by having delayChkpt set in their PGXACT.
  *
  * Returns a palloc'd array that should be freed by the caller.
  * *nvxids is the number of valid entries.
@@ -2204,8 +2202,8 @@ GetOldestSafeDecodingTransactionId(void)
  * the result is somewhat indeterminate, but we don't really care.  Even in
  * a multiprocessor with delayed writes to shared memory, it should be certain
  * that setting of delayChkpt will propagate to shared memory when the backend
- * takes a lock, so we cannot fail to see a virtual xact as delayChkpt if
- * it's already inserted its commit record.  Whether it takes a little while
+ * takes a lock, so we cannot fail to see a virtual xact as delayChkpt if it's
+ * already inserted its critical xlog record.  Whether it takes a little while
  * for clearing of delayChkpt to propagate is unimportant for correctness.
  */
 VirtualTransactionId *
