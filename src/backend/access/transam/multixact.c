@@ -2840,29 +2840,6 @@ MultiXactMemberFreezeThreshold(void)
 	return multixacts - victim_multixacts;
 }
 
-typedef struct mxtruncinfo
-{
-	int			earliestExistingPage;
-} mxtruncinfo;
-
-/*
- * SlruScanDirectory callback
- *		This callback determines the earliest existing page number.
- */
-static bool
-SlruScanDirCbFindEarliest(SlruCtl ctl, char *filename, int segpage, void *data)
-{
-	mxtruncinfo *trunc = (mxtruncinfo *) data;
-
-	if (trunc->earliestExistingPage == -1 ||
-		ctl->PagePrecedes(segpage, trunc->earliestExistingPage))
-	{
-		trunc->earliestExistingPage = segpage;
-	}
-
-	return false;				/* keep going */
-}
-
 
 /*
  * Delete members segments [oldest, newOldest)
@@ -2933,8 +2910,6 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB)
 	MultiXactOffset newOldestOffset;
 	MultiXactOffset oldestOffset;
 	MultiXactOffset nextOffset;
-	mxtruncinfo trunc;
-	MultiXactId earliest;
 
 	Assert(!RecoveryInProgress());
 	Assert(MultiXactState->finishedStartup);
@@ -2966,35 +2941,14 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB)
 	}
 
 	/*
-	 * Note we can't just plow ahead with the truncation; it's possible that
-	 * there are no segments to truncate, which is a problem because we are
-	 * going to attempt to read the offsets page to determine where to
-	 * truncate the members SLRU.  So we first scan the directory to determine
-	 * the earliest offsets page number that we can read without error.
-	 *
-	 * NB: It's also possible that the page that oldestMulti is on has already
-	 * been truncated away, and we crashed before updating oldestMulti.
-	 */
-	trunc.earliestExistingPage = -1;
-	SlruScanDirectory(MultiXactOffsetCtl, SlruScanDirCbFindEarliest, &trunc);
-	earliest = trunc.earliestExistingPage * MULTIXACT_OFFSETS_PER_PAGE;
-	if (earliest < FirstMultiXactId)
-		earliest = FirstMultiXactId;
-
-	/* If there's nothing to remove, we can bail out early. */
-	if (MultiXactIdPrecedes(oldestMulti, earliest))
-	{
-		LWLockRelease(MultiXactTruncationLock);
-		return;
-	}
-
-	/*
 	 * First, compute the safe truncation point for MultiXactMember. This is
 	 * the starting offset of the oldest multixact.
 	 *
-	 * Hopefully, find_multixact_start will always work here, because we've
-	 * already checked that it doesn't precede the earliest MultiXact on disk.
-	 * But if it fails, don't truncate anything, and log a message.
+	 * Due to bugs in early releases of PostgreSQL 9.3.X and 9.4.X,
+	 * oldestMXact might point to a multixact that does not exist.  Call
+	 * DetermineSafeOldestOffset() to emit the message about disabled member
+	 * wraparound protection.  Autovacuum will eventually advance oldestMXact
+	 * to a value that does exist.
 	 */
 	if (oldestMulti == nextMulti)
 	{
@@ -3003,16 +2957,15 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB)
 	}
 	else if (!find_multixact_start(oldestMulti, &oldestOffset))
 	{
-		ereport(LOG,
-				(errmsg("oldest MultiXact %u not found, earliest MultiXact %u, skipping truncation",
-						oldestMulti, earliest)));
 		LWLockRelease(MultiXactTruncationLock);
 		return;
 	}
 
 	/*
 	 * Secondly compute up to where to truncate. Lookup the corresponding
-	 * member offset for newOldestMulti for that.
+	 * member offset for newOldestMulti for that. Failure here is never
+	 * expected. If this fails, newOldestMulti was bogus, or there's a hole in
+	 * the sequence of segment files on disk.
 	 */
 	if (newOldestMulti == nextMulti)
 	{
