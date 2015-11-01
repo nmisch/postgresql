@@ -2576,9 +2576,9 @@ SetOffsetVacuumLimit(void)
 	MultiXactId	oldestMultiXactId;
 	MultiXactId nextMXact;
 	MultiXactOffset oldestOffset = 0;		/* placate compiler */
-	MultiXactOffset prevOldestOffset;
 	MultiXactOffset nextOffset;
 	bool		oldestOffsetKnown = false;
+	MultiXactOffset prevOldestOffset;
 	bool		prevOldestOffsetKnown;
 	MultiXactOffset offsetStopLimit = 0;
 
@@ -2593,8 +2593,8 @@ SetOffsetVacuumLimit(void)
 	oldestMultiXactId = MultiXactState->oldestMultiXactId;
 	nextMXact = MultiXactState->nextMXact;
 	nextOffset = MultiXactState->nextOffset;
-	prevOldestOffsetKnown = MultiXactState->oldestOffsetKnown;
 	prevOldestOffset = MultiXactState->oldestOffset;
+	prevOldestOffsetKnown = MultiXactState->oldestOffsetKnown;
 	Assert(MultiXactState->finishedStartup);
 	LWLockRelease(MultiXactGenLock);
 
