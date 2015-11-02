@@ -2981,14 +2981,23 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	}
 
 	/*
-	 * First, compute the safe truncation point for MultiXactMember. This is
-	 * the starting offset of the oldest multixact.
+	 * Read the MultiXactMember truncation lower bound.  This is the starting
+	 * offset of the oldest multixact still in use as of the last truncation.
 	 *
 	 * Due to bugs in early releases of PostgreSQL 9.3.X and 9.4.X,
 	 * oldestMulti might point to a multixact that does not exist.  Give up
 	 * and let SetMultiXactIdLimit() emit the message about disabled member
 	 * wraparound protection.  Autovacuum will eventually advance oldestMulti
 	 * to a value that does exist.
+	 *
+	 * When some [oldestMulti, newOldestMulti) subset does exist, returning
+	 * here leaves behind members segments covering that subset.  Those
+	 * segments will persist until the member space wraps around, reuses them,
+	 * and is able to truncate away their future tenants.  Offsets segments in
+	 * [oldestMulti, newOldestMulti) could remain that long; however, under
+	 * default vacuum settings, the next truncation attempt will delete them.
+	 * Leaving segments we could have truncated brings no ill effects beyond
+	 * wasting some disk space, so accept it in this rare scenario.
 	 */
 	if (oldestMulti == nextMulti)
 		oldestOffset = nextOffset;		/* there are NO MultiXacts */
@@ -2999,10 +3008,10 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 	}
 
 	/*
-	 * Secondly compute up to where to truncate. Lookup the corresponding
-	 * member offset for newOldestMulti for that. Failure here is never
-	 * expected. If this fails, newOldestMulti was bogus, or there's a hole in
-	 * the sequence of segment files on disk.
+	 * Read the MultiXactMember truncation upper bound.  Failure is never
+	 * expected; newOldestMulti was bogus, or there's a hole in the sequence
+	 * of segment files expected on disk.  Returning here has the same
+	 * consequences as just described.
 	 */
 	if (newOldestMulti == nextMulti)
 		oldestOffset = nextOffset;		/* there are NO MultiXacts */
@@ -3026,21 +3035,29 @@ TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_reco
 		 MXOffsetToMemberSegment(newOldestOffset));
 
 	/*
-	 * Do truncation, and the WAL logging of the truncation, in a critical
-	 * section. That way offsets/members cannot get out of sync anymore, i.e.
-	 * once consistent the newOldestMulti will always exist in members, even
-	 * if we crashed in the wrong moment.
+	 * Segment removal is, ultimately, best-effort; slru.c does not fsync
+	 * directories or check unlink() return values.  Nonetheless, pg_multixact
+	 * truncation warrants more reliability than pg_clog truncation.  First,
+	 * the maximum pg_multixact size is fifty-six times the maximum pg_clog
+	 * size.  Second, if we fail to unlink some pg_multixact/members segment
+	 * in a truncation attempt, the next truncation will not retry that
+	 * unlink.  (pg_clog or pg_multixact/offsets truncations most often do
+	 * retry previous failures.)
+	 *
+	 * With that background, do truncation in a critical section so we can
+	 * regard ERROR exits as a type of crash.  We accept more PANIC risk than
+	 * RelationTruncate(), because waste here would persist longer.
 	 */
 	START_CRIT_SECTION();
 
 	/*
-	 * Prevent checkpoints from being scheduled concurrently. This is critical
-	 * because otherwise a truncation record might not be replayed after a
-	 * crash/basebackup, even though the state of the data directory would
-	 * require it.  It's not possible (startup process doesn't have a PGXACT
-	 * entry), and not needed, to do this during recovery, when performing an
-	 * old-style truncation, though. There the entire scheduling depends on
-	 * the replayed WAL records which be the same after a possible crash.
+	 * Prevent checkpoints from being scheduled concurrently. Otherwise, we'd
+	 * waste disk space by not replaying truncation after a crash/basebackup
+	 * between WriteMTruncateXlogRec() and unlinking the last segment. It's
+	 * not possible (startup process doesn't have a PGXACT entry), and not
+	 * needed, to do this during recovery, when performing an old-style
+	 * truncation, though. There the entire scheduling depends on the replayed
+	 * WAL records which be the same after a possible crash.
 	 */
 	if (!in_recovery)
 	{
@@ -3185,8 +3202,13 @@ WriteMZeroPageXlogRec(int pageno, uint8 info)
 /*
  * Write a TRUNCATE xlog record
  *
- * We must flush the xlog record to disk before returning --- see notes in
- * TruncateCLOG().
+ * Flushing the record to disk serves two critical roles.  Like it is with
+ * TruncateCLOG(), recent HEAP_FREEZE records must reach disk before we delete
+ * any MultiXactId they overwrote.  This flush before unlinking any segment
+ * ensures that a crash/basebackup and recovery will not make
+ * MultiXactState->oldestMultiXactId point to a missing segment.  Failure to
+ * ensure that would prompt SetOffsetVacuumLimit() to trigger an emergency
+ * autovacuum storm.
  */
 static void
 WriteMTruncateXlogRec(Oid oldestMultiDB,
