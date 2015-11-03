@@ -6330,12 +6330,6 @@ StartupXLOG(void)
 	StartupReorderBuffer();
 
 	/*
-	 * Startup MultiXact. We need to do this early to be able to replay
-	 * truncations.
-	 */
-	StartupMultiXact();
-
-	/*
 	 * Recover knowledge about replay progress of known replication partners.
 	 */
 	StartupReplicationOrigin();
@@ -6562,13 +6556,14 @@ StartupXLOG(void)
 			ProcArrayInitRecovery(ShmemVariableCache->nextXid);
 
 			/*
-			 * Startup commit log, commit timestamp and subtrans only.
-			 * MultiXact has already been started up and other SLRUs are not
-			 * maintained during recovery and need not be started yet.
+			 * Startup commit log, commit timestamp, subtrans and MultiXact
+			 * only.  Other SLRUs are not maintained during recovery and need
+			 * not be started yet.
 			 */
 			StartupCLOG();
 			StartupCommitTs(ControlFile->track_commit_timestamp);
 			StartupSUBTRANS(oldestActiveXID);
+			StartupMultiXact();
 
 			/*
 			 * If we're beginning at a shutdown checkpoint, we know that
@@ -7330,14 +7325,15 @@ StartupXLOG(void)
 	LWLockRelease(ProcArrayLock);
 
 	/*
-	 * Start up the commit log, commit timestamp and subtrans, if not already
-	 * done for hot standby.
+	 * Start up the commit log, commit timestamp, subtrans and MultiXact if
+	 * not already done for hot standby.
 	 */
 	if (standbyState == STANDBY_DISABLED)
 	{
 		StartupCLOG();
 		StartupCommitTs(false);
 		StartupSUBTRANS(oldestActiveXID);
+		StartupMultiXact();
 	}
 
 	/*
