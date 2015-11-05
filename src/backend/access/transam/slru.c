@@ -1235,12 +1235,10 @@ SlruDeleteSegment(SlruCtl ctl, int segno)
 	SlruShared	shared = ctl->shared;
 	int			slotno;
 	char		path[MAXPGPATH];
-	bool		did_write;
 
 	/* Clean out any possibly existing references to the segment. */
 	LWLockAcquire(shared->ControlLock, LW_EXCLUSIVE);
 restart:
-	did_write = false;
 	for (slotno = 0; slotno < shared->num_slots; slotno++)
 	{
 		int			pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
@@ -1252,7 +1250,9 @@ restart:
 		if (pagesegno != segno)
 			continue;
 
-		/* If page is clean, just change state to EMPTY (expected case). */
+		/*
+		 * If page is clean, just change state to EMPTY (expected case).
+		 */
 		if (shared->page_status[slotno] == SLRU_PAGE_VALID &&
 			!shared->page_dirty[slotno])
 		{
@@ -1265,16 +1265,8 @@ restart:
 			SlruInternalWritePage(ctl, slotno, NULL);
 		else
 			SimpleLruWaitIO(ctl, slotno);
-
-		did_write = true;
-	}
-
-	/*
-	 * Be extra careful and re-check. The IO functions release the control
-	 * lock, so new pages could have been read in.
-	 */
-	if (did_write)
 		goto restart;
+	}
 
 	snprintf(path, MAXPGPATH, "%s/%04X", ctl->Dir, segno);
 	ereport(DEBUG2,
