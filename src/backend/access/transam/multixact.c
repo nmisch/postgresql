@@ -2632,9 +2632,23 @@ SetOffsetVacuumLimit(void)
 					(errmsg("oldest MultiXactId member is at offset %u",
 					oldestOffset)));
 		else
+		{
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are disabled because oldest checkpointed MultiXact %u does not exist on disk",
 							oldestMultiXactId)));
+
+			if (prevOldestOffsetKnown)
+			{
+				/*
+				 * We failed to get the oldest offset this time but have a
+				 * value from a previous pass through this function.  Use the
+				 * old value.  XXX the log message just done is incorrect for
+				 * this case.
+				 */
+				oldestOffset = prevOldestOffset;
+				oldestOffsetKnown = true;
+			}
+		}
 	}
 
 	LWLockRelease(MultiXactTruncationLock);
@@ -2659,16 +2673,6 @@ SetOffsetVacuumLimit(void)
 		ereport(DEBUG1,
 		(errmsg("MultiXact member stop limit is now %u based on MultiXact %u",
 				offsetStopLimit, oldestMultiXactId)));
-	}
-	else if (prevOldestOffsetKnown)
-	{
-		/*
-		 * If we failed to get the oldest offset this time, but we have a
-		 * value from a previous pass through this function, use the old value
-		 * rather than automatically forcing it.
-		 */
-		oldestOffset = prevOldestOffset;
-		oldestOffsetKnown = true;
 	}
 
 	/* Install the computed values */
