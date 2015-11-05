@@ -2589,6 +2589,7 @@ DetermineSafeOldestOffset(MultiXactId oldestMXact)
 		oldestOffsetKnown = find_multixact_start(oldestMXact, &oldestOffset);
 		if (!oldestOffsetKnown)
 		{
+			/* XXX This message is incorrect if prevOffsetStopLimitKnown. */
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are disabled because oldest checkpointed MultiXact %u does not exist on disk",
 						oldestMXact)));
