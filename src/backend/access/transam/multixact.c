@@ -2642,7 +2642,7 @@ SetOffsetVacuumLimit(void)
 				/*
 				 * We failed to get the oldest offset this time but have a
 				 * value from a previous pass through this function.  Use the
-				 * old value.  XXX the log message just done is incorrect for
+				 * old value.  XXX the message just reported is incorrect for
 				 * this case.
 				 */
 				oldestOffset = prevOldestOffset;
