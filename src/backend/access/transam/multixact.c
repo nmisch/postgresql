@@ -2582,7 +2582,6 @@ SetOffsetVacuumLimit(void)
 	bool		oldestOffsetKnown = false;
 	MultiXactOffset prevOldestOffset;
 	bool		prevOldestOffsetKnown;
-	MultiXactOffset offsetStopLimit = 0;
 
 	/*
 	 * NB: Have to prevent concurrent truncation, we might otherwise try to
@@ -2601,11 +2600,8 @@ SetOffsetVacuumLimit(void)
 	LWLockRelease(MultiXactGenLock);
 
 	/*
-	 * Determine the offset of the oldest multixact.  Normally, we can read
-	 * the offset from the multixact itself, but there's an important special
-	 * case: if there are no multixacts in existence at all, oldestMXact
-	 * obviously can't point to one.  It will instead point to the multixact
-	 * ID that will be assigned the next time one is needed.
+	 * If no multixacts exist, then oldestMultiXactId will be the next
+	 * multixact that will be created, rather than an existing multixact.
 	 */
 	if (oldestMultiXactId == nextMXact)
 	{
@@ -2626,61 +2622,61 @@ SetOffsetVacuumLimit(void)
 		 */
 		oldestOffsetKnown =
 			find_multixact_start(oldestMultiXactId, &oldestOffset);
-
-		if (oldestOffsetKnown)
-			ereport(DEBUG1,
-					(errmsg("oldest MultiXactId member is at offset %u",
-					oldestOffset)));
-		else
+		if (!oldestOffsetKnown)
 		{
+			/* XXX This message is incorrect if prevOldestOffsetKnown. */
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are disabled because oldest checkpointed MultiXact %u does not exist on disk",
 							oldestMultiXactId)));
-
-			if (prevOldestOffsetKnown)
-			{
-				/*
-				 * We failed to get the oldest offset this time but have a
-				 * value from a previous pass through this function.  Use the
-				 * old value.  XXX the message just reported is incorrect for
-				 * this case.
-				 */
-				oldestOffset = prevOldestOffset;
-				oldestOffsetKnown = true;
-			}
 		}
 	}
 
 	LWLockRelease(MultiXactTruncationLock);
 
 	/*
-	 * If we can, compute limits (and install them MultiXactState) to prevent
-	 * overrun of old data in the members SLRU area. We can only do so if the
-	 * oldest offset is known though.
+	 * There's no need to update anything if we don't know the oldest offset
+	 * or if it hasn't changed.
 	 */
-	if (oldestOffsetKnown)
+	if ((oldestOffsetKnown && !prevOldestOffsetKnown) ||
+		(oldestOffsetKnown && prevOldestOffset != oldestOffset))
 	{
+		MultiXactOffset offsetStopLimit;
+
 		/* move back to start of the corresponding segment */
 		offsetStopLimit = oldestOffset - (oldestOffset %
 					  (MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT));
-
 		/* always leave one segment before the wraparound point */
 		offsetStopLimit -= (MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT);
 
+		/* Install the new limits. */
+		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
+		MultiXactState->oldestOffset = oldestOffset;
+		MultiXactState->oldestOffsetKnown = oldestOffsetKnown;
+		MultiXactState->offsetStopLimit = offsetStopLimit;
+		LWLockRelease(MultiXactGenLock);
+
+		ereport(DEBUG1,
+				(errmsg("oldest MultiXactId member is at offset %u",
+						oldestOffset)));
 		if (!prevOldestOffsetKnown && IsUnderPostmaster)
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are now enabled")));
 		ereport(DEBUG1,
-		(errmsg("MultiXact member stop limit is now %u based on MultiXact %u",
-				offsetStopLimit, oldestMultiXactId)));
+				(errmsg("MultiXact member stop limit is now %u based on MultiXact %u",
+						offsetStopLimit, oldestMultiXactId)));
 	}
 
-	/* Install the computed values */
-	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
-	MultiXactState->oldestOffset = oldestOffset;
-	MultiXactState->oldestOffsetKnown = oldestOffsetKnown;
-	MultiXactState->offsetStopLimit = offsetStopLimit;
-	LWLockRelease(MultiXactGenLock);
+	/*
+	 * If we failed to get the oldest offset this time, but we have a value
+	 * from a previous pass through this function, assess the need for
+	 * autovacuum based on that old value rather than automatically forcing
+	 * it.
+	 */
+	if (prevOldestOffsetKnown && !oldestOffsetKnown)
+	{
+		oldestOffset = prevOldestOffset;
+		oldestOffsetKnown = true;
+	}
 
 	/*
 	 * Do we need an emergency autovacuum?  If we're not sure, assume yes.
