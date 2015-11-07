@@ -2385,16 +2385,24 @@ MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
 	Assert(InRecovery);
 
 	if (MultiXactIdPrecedes(MultiXactState->oldestMultiXactId, oldestMulti))
+		SetMultiXactIdLimit(oldestMulti, oldestMultiDB);
+}
+
+/*
+ * If there has been a truncation on the master, detected by seeing a moving
+ * oldestMulti without a corresponding truncation record, we know that the
+ * primary is still running an older version of postgres that doesn't yet log
+ * multixact truncations. So perform the truncation ourselves. XXX if
+ * TruncateMultiXact() gives up due to find_multixact_start() failure, this
+ * performs a legacy truncation in error.
+ */
+void
+LegacyTruncateMultiXact(MultiXactId oldestMulti, Oid oldestMultiDB)
+{
+	Assert(InRecovery);
+
+	if (MultiXactIdPrecedes(MultiXactState->oldestMultiXactId, oldestMulti))
 	{
-		/*
-		 * If there has been a truncation on the master, detected by seeing a
-		 * moving oldestMulti, without a corresponding truncation record, we
-		 * know that the primary is still running an older version of postgres
-		 * that doesn't yet log multixact truncations. So perform the
-		 * truncation ourselves.  XXX if TruncateMultiXact() gives up due to
-		 * find_multixact_start() failure, this performs a legacy truncation
-		 * in error.
-		 */
 		if (!MultiXactState->sawTruncationInCkptCycle)
 		{
 			ereport(LOG,
@@ -2403,8 +2411,6 @@ MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
 					 errhint("Upgrade the primary; it is susceptible to data corruption.")));
 			TruncateMultiXact(oldestMulti, oldestMultiDB, true);
 		}
-
-		SetMultiXactIdLimit(oldestMulti, oldestMultiDB);
 	}
 
 	/* only looked at in the startup process, no lock necessary */
