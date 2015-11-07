@@ -2391,7 +2391,9 @@ MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB)
 		 * moving oldestMulti, without a corresponding truncation record, we
 		 * know that the primary is still running an older version of postgres
 		 * that doesn't yet log multixact truncations. So perform the
-		 * truncation ourselves.
+		 * truncation ourselves.  XXX if TruncateMultiXact() gives up due to
+		 * find_multixact_start() failure, this performs a legacy truncation
+		 * in error.
 		 */
 		if (!MultiXactState->sawTruncationInCkptCycle)
 		{
