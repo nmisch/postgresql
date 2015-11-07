@@ -265,7 +265,7 @@ typedef struct MultiXactStateData
 	 * we compute it (using nextMXact if none are valid).  Each backend is
 	 * required not to attempt to access any SLRU data for MultiXactIds older
 	 * than its own OldestVisibleMXactId[] setting; this is necessary because
-	 * the checkpointer could truncate away such data at any instant.
+	 * VACUUM could truncate away such data at any instant.
 	 *
 	 * The oldest valid value among all of the OldestMemberMXactId[] and
 	 * OldestVisibleMXactId[] entries is considered by vacuum as the earliest
@@ -279,8 +279,8 @@ typedef struct MultiXactStateData
 	 * the freezing point so computed is used as the new pg_class.relminmxid
 	 * value.  The minimum of all those values in a database is stored as
 	 * pg_database.datminmxid.  In turn, the minimum of all of those values is
-	 * stored in pg_control and used as truncation point for pg_multixact.  At
-	 * checkpoint or restartpoint, unneeded segments are removed.
+	 * stored in pg_control and used as truncation point for pg_multixact.
+	 * VACUUM removes unneeded segments.
 	 */
 	MultiXactId perBackendXactIds[FLEXIBLE_ARRAY_MEMBER];
 } MultiXactStateData;
@@ -670,8 +670,8 @@ MultiXactIdSetOldestMember(void)
  *
  * We set the OldestVisibleMXactId for a given transaction the first time
  * it's going to inspect any MultiXactId.  Once we have set this, we are
- * guaranteed that the checkpointer won't truncate off SLRU data for
- * MultiXactIds at or after our OldestVisibleMXactId.
+ * guaranteed that VACUUM won't truncate off SLRU data for MultiXactIds at
+ * or after our OldestVisibleMXactId.
  *
  * The value to set is the oldest of nextMXact and all the valid per-backend
  * OldestMemberMXactId[] entries.  Because of the locking we do, we can be
