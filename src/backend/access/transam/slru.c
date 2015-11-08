@@ -1241,12 +1241,13 @@ SlruDeleteSegment(SlruCtl ctl, int segno)
 restart:
 	for (slotno = 0; slotno < shared->num_slots; slotno++)
 	{
-		int			pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
+		int			pagesegno;
 
 		if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
 			continue;
 
 		/* not the segment we're looking for */
+		pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
 		if (pagesegno != segno)
 			continue;
 

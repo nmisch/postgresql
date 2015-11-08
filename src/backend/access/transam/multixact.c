@@ -108,7 +108,8 @@
 	((xid) / (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
 #define MultiXactIdToOffsetEntry(xid) \
 	((xid) % (MultiXactOffset) MULTIXACT_OFFSETS_PER_PAGE)
-#define MultiXactIdToOffsetSegment(xid) (MultiXactIdToOffsetPage(xid) / SLRU_PAGES_PER_SEGMENT)
+#define MultiXactIdToOffsetSegment(xid) \
+	(MultiXactIdToOffsetPage(xid) / SLRU_PAGES_PER_SEGMENT)
 
 /*
  * The situation for members is a bit more complex: we store one byte of
@@ -153,7 +154,8 @@
 
 /* page in which a member is to be found */
 #define MXOffsetToMemberPage(xid) ((xid) / (TransactionId) MULTIXACT_MEMBERS_PER_PAGE)
-#define MXOffsetToMemberSegment(xid) (MXOffsetToMemberPage(xid) / SLRU_PAGES_PER_SEGMENT)
+#define MXOffsetToMemberSegment(xid) \
+	(MXOffsetToMemberPage(xid) / SLRU_PAGES_PER_SEGMENT)
 
 /* Location (byte offset within page) of flag word for a given member */
 #define MXOffsetToFlagsOffset(xid) \
@@ -371,8 +373,10 @@ static bool SetOffsetVacuumLimit(void);
 static bool find_multixact_start(MultiXactId multi, MultiXactOffset *result);
 static void WriteMZeroPageXlogRec(int pageno, uint8 info);
 static void WriteMTruncateXlogRec(Oid oldestMultiDB,
-					  MultiXactId startOff, MultiXactId endOff,
-					  MultiXactOffset startMemb, MultiXactOffset endMemb);
+					  MultiXactId startTruncOff,
+					  MultiXactId endTruncOff,
+					  MultiXactOffset startTruncMemb,
+					  MultiXactOffset endTruncMemb);
 
 
 /*
@@ -2654,7 +2658,8 @@ SetOffsetVacuumLimit(void)
 		offsetStopLimit = oldestOffset - (oldestOffset %
 					  (MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT));
 		/* always leave one segment before the wraparound point */
-		offsetStopLimit -= (MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT);
+		offsetStopLimit -=
+			MULTIXACT_MEMBERS_PER_PAGE * SLRU_PAGES_PER_SEGMENT;
 
 		/* Install the new limits. */
 		LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
@@ -2890,7 +2895,8 @@ MultiXactMemberFreezeThreshold(void)
  * SLRU. C.f. TruncateMultiXact().
  */
 static void
-PerformMembersTruncation(MultiXactOffset oldestOffset, MultiXactOffset newOldestOffset)
+PerformMembersTruncation(MultiXactOffset oldestOffset,
+						 MultiXactOffset newOldestOffset)
 {
 	const int	maxsegment = MXOffsetToMemberSegment(MaxMultiXactOffset);
 	int			startsegment = MXOffsetToMemberSegment(oldestOffset);
@@ -2946,7 +2952,8 @@ PerformOffsetsTruncation(MultiXactId oldestMulti, MultiXactId newOldestMulti)
  * is one of the databases preventing newOldestMulti from increasing.
  */
 void
-TruncateMultiXact(MultiXactId newOldestMulti, Oid newOldestMultiDB, bool in_recovery)
+TruncateMultiXact(MultiXactId newOldestMulti,
+				  Oid newOldestMultiDB, bool in_recovery)
 {
 	MultiXactId oldestMulti;
 	MultiXactId nextMulti;
@@ -3220,8 +3227,10 @@ WriteMZeroPageXlogRec(int pageno, uint8 info)
  */
 static void
 WriteMTruncateXlogRec(Oid oldestMultiDB,
-					  MultiXactId startTruncOff, MultiXactId endTruncOff,
-				MultiXactOffset startTruncMemb, MultiXactOffset endTruncMemb)
+					  MultiXactId startTruncOff,
+					  MultiXactId endTruncOff,
+					  MultiXactOffset startTruncMemb,
+					  MultiXactOffset endTruncMemb)
 {
 	XLogRecPtr	recptr;
 	xl_multixact_truncate xlrec;
