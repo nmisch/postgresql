@@ -3089,8 +3089,8 @@ TruncateMultiXact(MultiXactId newOldestMulti,
 	 * the critical section: Have to do it before truncation, to prevent
 	 * concurrent lookups of those values. Has to be inside the critical
 	 * section as otherwise a future call to this function would error out,
-	 * while looking up the oldest member in offsets, if our caller crashes
-	 * before updating the limits.
+	 * while looking up the oldest member in offsets, given ereport(ERROR)
+	 * before our caller updates the limits.
 	 */
 	LWLockAcquire(MultiXactGenLock, LW_EXCLUSIVE);
 	MultiXactState->oldestMultiXactId = newOldestMulti;
