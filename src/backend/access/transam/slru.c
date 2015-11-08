@@ -1151,9 +1151,7 @@ SimpleLruTruncate(SlruCtl ctl, int cutoffPage)
 
 	/*
 	 * Scan shared memory and remove any pages preceding the cutoff page, to
-	 * ensure we won't rewrite them later.  (Since this is normally called in
-	 * or just after a checkpoint, any dirty pages should have been flushed
-	 * already ... we're just being extra careful here.)
+	 * ensure we won't rewrite them later.
 	 */
 	LWLockAcquire(shared->ControlLock, LW_EXCLUSIVE);
 
@@ -1237,24 +1235,25 @@ SlruDeleteSegment(SlruCtl ctl, int segno)
 	SlruShared	shared = ctl->shared;
 	int			slotno;
 	char		path[MAXPGPATH];
-	bool		did_write;
 
 	/* Clean out any possibly existing references to the segment. */
 	LWLockAcquire(shared->ControlLock, LW_EXCLUSIVE);
 restart:
-	did_write = false;
 	for (slotno = 0; slotno < shared->num_slots; slotno++)
 	{
-		int			pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
+		int			pagesegno;
 
 		if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
 			continue;
 
 		/* not the segment we're looking for */
+		pagesegno = shared->page_number[slotno] / SLRU_PAGES_PER_SEGMENT;
 		if (pagesegno != segno)
 			continue;
 
-		/* If page is clean, just change state to EMPTY (expected case). */
+		/*
+		 * If page is clean, just change state to EMPTY (expected case).
+		 */
 		if (shared->page_status[slotno] == SLRU_PAGE_VALID &&
 			!shared->page_dirty[slotno])
 		{
@@ -1267,18 +1266,10 @@ restart:
 			SlruInternalWritePage(ctl, slotno, NULL);
 		else
 			SimpleLruWaitIO(ctl, slotno);
-
-		did_write = true;
+		goto restart;
 	}
 
-	/*
-	 * Be extra careful and re-check. The IO functions release the control
-	 * lock, so new pages could have been read in.
-	 */
-	if (did_write)
-		goto restart;
-
-	snprintf(path, MAXPGPATH, "%s/%04X", ctl->Dir, segno);
+	SlruFileName(ctl, path, segno);
 	ereport(DEBUG2,
 			(errmsg("removing file \"%s\"", path)));
 	unlink(path);

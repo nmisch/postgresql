@@ -102,10 +102,8 @@ the MultiXacts in them are no longer of interest.
 VACUUM is in charge of removing old MultiXacts at the time of tuple freezing.
 The lower bound used by vacuum (that is, the value below which all multixacts
 are removed) is stored as pg_class.relminmxid for each table; the minimum of
-all such values is stored in pg_database.datminmxid.  The minimum across
-all databases, in turn, is recorded in checkpoint records, and CHECKPOINT
-removes pg_multixact/ segments older than that value once the checkpoint
-record has been flushed.
+all such values is stored in pg_database.datminmxid.  VACUUM removes
+pg_multixact/ segments older than the minimum datminmxid across databases.
 
 Infomask Bits
 -------------
