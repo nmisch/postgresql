@@ -2675,8 +2675,8 @@ SetOffsetVacuumLimit(void)
 			ereport(LOG,
 					(errmsg("MultiXact member wraparound protections are now enabled")));
 		ereport(DEBUG1,
-				(errmsg("MultiXact member stop limit is now %u based on MultiXact %u",
-						offsetStopLimit, oldestMultiXactId)));
+		(errmsg("MultiXact member stop limit is now %u based on MultiXact %u",
+				offsetStopLimit, oldestMultiXactId)));
 	}
 
 	/*
