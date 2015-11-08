@@ -2405,16 +2405,14 @@ LegacyTruncateMultiXact(MultiXactId oldestMulti, Oid oldestMultiDB)
 {
 	Assert(InRecovery);
 
-	if (MultiXactIdPrecedes(MultiXactState->oldestMultiXactId, oldestMulti))
+	if (MultiXactIdPrecedes(MultiXactState->oldestMultiXactId, oldestMulti)
+		&& !MultiXactState->sawTruncationInCkptCycle)
 	{
-		if (!MultiXactState->sawTruncationInCkptCycle)
-		{
-			ereport(LOG,
-					(errmsg("performing legacy multixact truncation"),
-					 errdetail("Legacy truncations are sometimes performed when replaying WAL from an older primary."),
-					 errhint("Upgrade the primary; it is susceptible to data corruption.")));
-			TruncateMultiXact(oldestMulti, oldestMultiDB, true);
-		}
+		ereport(LOG,
+				(errmsg("performing legacy multixact truncation"),
+				 errdetail("Legacy truncations are sometimes performed when replaying WAL from an older primary."),
+				 errhint("Upgrade the primary; it is susceptible to data corruption.")));
+		TruncateMultiXact(oldestMulti, oldestMultiDB, true);
 	}
 
 	/* only looked at in the startup process, no lock necessary */
