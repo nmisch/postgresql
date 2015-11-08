@@ -9213,8 +9213,6 @@ xlog_redo(XLogReaderState *record)
 		MultiXactSetNextMXact(checkPoint.nextMulti,
 							  checkPoint.nextMultiOffset);
 		SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
-		LegacyTruncateMultiXact(checkPoint.oldestMulti,
-								checkPoint.oldestMultiDB);
 		SetMultiXactIdLimit(checkPoint.oldestMulti, checkPoint.oldestMultiDB);
 
 		/*
@@ -9309,8 +9307,6 @@ xlog_redo(XLogReaderState *record)
 								  checkPoint.oldestXid))
 			SetTransactionIdLimit(checkPoint.oldestXid,
 								  checkPoint.oldestXidDB);
-		LegacyTruncateMultiXact(checkPoint.oldestMulti,
-								checkPoint.oldestMultiDB);
 		MultiXactAdvanceOldest(checkPoint.oldestMulti,
 							   checkPoint.oldestMultiDB);
 
