@@ -136,7 +136,7 @@ endif
 
 if host_system == 'windows'
   post_export_backend_sources += rc_server_gen.process(win32ver_rc, extra_args: [
-    '--NAME', 'postgres.exe',
+    '--NAME', 'postgres',
     '--FILEDESC', 'PostgreSQL Server',])
 endif
 
