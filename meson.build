@@ -2714,9 +2714,12 @@ if host_system == 'windows'
     rcgen_base_args += ['--depfile', '@DEPFILE@']
   endif
 
-  rcgen_bin_args = rcgen_base_args + [
+  rcgen_server_args = rcgen_base_args + [
     '--VFT_TYPE', 'VFT_APP',
-    '--FILEENDING', 'exe',
+    '--FILEENDING', 'exe'
+  ]
+
+  rcgen_bin_args = rcgen_server_args + [
     '--ICO', pg_ico
   ]
 
@@ -2728,6 +2731,12 @@ if host_system == 'windows'
   rc_bin_gen = generator(rcgen,
     depfile: '@BASENAME@.d',
     arguments: rcgen_bin_args,
+    output: rcgen_outputs,
+  )
+
+  rc_server_gen = generator(rcgen,
+    depfile: '@BASENAME@.d',
+    arguments: rcgen_server_args,
     output: rcgen_outputs,
   )
 
