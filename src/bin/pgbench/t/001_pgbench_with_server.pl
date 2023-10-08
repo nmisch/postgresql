@@ -116,6 +116,7 @@ $node->pgbench(
 	[qr{^$}],
 	'pgbench tpcb-like');
 
+for (1 .. 100) {
 $node->pgbench(
 	'--transactions=20 --client=5 -M extended --builtin=si -C --no-vacuum -s 1',
 	0,
@@ -128,6 +129,7 @@ $node->pgbench(
 	],
 	[qr{scale option ignored}],
 	'pgbench simple update');
+}
 
 $node->pgbench(
 	'-t 100 -c 7 -M prepared -b se --debug',
