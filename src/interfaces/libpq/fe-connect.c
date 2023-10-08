@@ -2902,6 +2902,7 @@ keep_going:						/* We will come back to here until there is
 												SOCK_STRERROR(errorno, sebuf, sizeof(sebuf)));
 						goto error_return;
 					}
+					printf("((PGconn)0x%p)->sock = %d\n", conn, conn->sock);
 
 					/*
 					 * Once we've identified a target address, all errors
@@ -7272,7 +7273,7 @@ PQsocket(const PGconn *conn)
 {
 	if (!conn)
 		return -1;
-	printf("PQsocket(%p) = %d\n", conn, conn->sock);
+	printf("PQsocket(0x%p) = %d\n", conn, conn->sock);
 	return (conn->sock != PGINVALID_SOCKET) ? conn->sock : -1;
 }
 
