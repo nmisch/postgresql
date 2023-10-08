@@ -7763,6 +7763,7 @@ add_socket_to_set(socket_set *sa, int fd, int idx)
 	FD_SET(fd, &sa->fds);
 	if (fd > sa->maxfd)
 		sa->maxfd = fd;
+	printf("added sockfd=%d\n", fd);
 }
 
 static int
