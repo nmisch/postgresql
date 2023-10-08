@@ -623,7 +623,7 @@ task:
   upload_caches: ccache
 
   test_world_script: |
-    %BASH% -c "meson test %MTEST_ARGS% --num-processes %TEST_JOBS%"
+    %BASH% -c "meson test %MTEST_ARGS% --num-processes %TEST_JOBS% --suite setup --suite postgresql:pgbench"
 
   on_failure:
     <<: *on_failure_meson
