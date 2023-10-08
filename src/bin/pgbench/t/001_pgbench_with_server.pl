@@ -1446,4 +1446,7 @@ $node->safe_psql('postgres', 'DROP TABLE first_client_table, xy;');
 # done
 $node->safe_psql('postgres', 'DROP TABLESPACE regress_pgbench_tap_1_ts');
 $node->stop;
+
+die "force failure to get logs";
+
 done_testing();
