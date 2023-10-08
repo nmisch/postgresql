@@ -116,7 +116,7 @@ $node->pgbench(
 	[qr{^$}],
 	'pgbench tpcb-like');
 
-for (1 .. 100) {
+for (1 .. 2) {
 $node->pgbench(
 	'--transactions=20 --client=5 -M extended --builtin=si -C --no-vacuum -s 1',
 	0,

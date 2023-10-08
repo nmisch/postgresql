@@ -7272,6 +7272,7 @@ PQsocket(const PGconn *conn)
 {
 	if (!conn)
 		return -1;
+	printf("PQsocket(%p) = %d\n", conn, conn->sock);
 	return (conn->sock != PGINVALID_SOCKET) ? conn->sock : -1;
 }
 

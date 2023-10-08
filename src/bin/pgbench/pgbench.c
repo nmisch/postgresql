@@ -43,6 +43,7 @@
 #include <sys/resource.h>		/* for getrlimit */
 
 /* For testing, PGBENCH_USE_SELECT can be defined to force use of that code */
+#define PGBENCH_USE_SELECT
 #if defined(HAVE_PPOLL) && !defined(PGBENCH_USE_SELECT)
 #define POLL_USING_PPOLL
 #ifdef HAVE_POLL_H
