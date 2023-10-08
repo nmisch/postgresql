@@ -999,16 +999,26 @@ Arguments:
 
 =cut
 
+my $command_counter = 0;
 sub command_checks_all
 {
 	local $Test::Builder::Level = $Test::Builder::Level + 1;
 
 	my ($cmd, $expected_ret, $out, $err, $test_name) = @_;
+	my $ordinal = $command_counter++;
 
 	# run command
 	my ($stdout, $stderr);
-	print("# Running: " . join(" ", @{$cmd}) . "\n");
-	IPC::Run::run($cmd, '>', \$stdout, '2>', \$stderr);
+	print("# Running $ordinal: " . join(" ", @{$cmd}) . "\n");
+	{
+		local $ENV{PGAPPNAME} = "$ENV{PGAPPNAME}:$ordinal";
+		IPC::Run::run($cmd, '>', \$stdout, '2>', \$stderr);
+	}
+
+	print("# command stdout:
+$stdout
+# command stderr:
+$stderr\n");
 
 	# See http://perldoc.perl.org/perlvar.html#%24CHILD_ERROR
 	my $ret = $?;
