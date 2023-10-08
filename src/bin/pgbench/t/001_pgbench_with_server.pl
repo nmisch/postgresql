@@ -127,7 +127,7 @@ $node->pgbench(
 		qr{processed: 100/100},
 		qr{mode: extended}
 	],
-	[qr{scale option ignored}],
+	[qr{^\Qpgbench: warning: scale option ignored, using count from pgbench_branches table (1)\E$}s],
 	'pgbench simple update');
 }
 
