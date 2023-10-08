@@ -118,7 +118,7 @@ $node->pgbench(
 
 for (1 .. 2) {
 $node->pgbench(
-	'--transactions=20 --client=5 -M extended --builtin=si -C --no-vacuum -s 1',
+	'--transactions=10 --client=9 -M extended --builtin=si -C --no-vacuum -s 1',
 	0,
 	[
 		qr{builtin: simple update},
