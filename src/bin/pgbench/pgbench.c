@@ -7788,7 +7788,7 @@ add_socket_to_set(socket_set *sa, int fd, int idx)
 		 * Doing a hard exit here is a bit grotty, but it doesn't seem worth
 		 * complicating the API to make it less grotty.
 		 */
-		pg_fatal("too many client connections for select()");
+		pg_fatal("too many client connections (%d), for select()", fd);
 	}
 	FD_SET(fd, &sa->fds);
 	if (fd > sa->maxfd)
